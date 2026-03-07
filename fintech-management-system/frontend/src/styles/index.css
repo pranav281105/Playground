@@ -1,0 +1,70 @@
+:root {
+  --bg: #f4f7fb;
+  --surface: #ffffff;
+  --primary: #0b5fff;
+  --text: #101828;
+  --muted: #667085;
+  --success: #12b76a;
+  --danger: #d92d20;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Manrope", "Segoe UI", sans-serif;
+  background: radial-gradient(circle at 20% 10%, #e9f1ff 0, #f4f7fb 45%, #f2f5f9 100%);
+  color: var(--text);
+}
+
+.container {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 1rem;
+}
+
+.card {
+  background: var(--surface);
+  border-radius: 14px;
+  padding: 1rem;
+  box-shadow: 0 6px 24px rgba(17, 24, 39, 0.06);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+}
+
+.nav {
+  display: flex;
+  gap: 0.6rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+
+.nav button {
+  border: 0;
+  border-radius: 999px;
+  padding: 0.5rem 0.9rem;
+  cursor: pointer;
+  background: #dbe7ff;
+  color: #143c8a;
+}
+
+.nav button.active {
+  background: var(--primary);
+  color: #ffffff;
+}
+
+.metric-value {
+  font-size: 1.4rem;
+  font-weight: 700;
+}
+
+.metric-label {
+  color: var(--muted);
+  font-size: 0.86rem;
+}
