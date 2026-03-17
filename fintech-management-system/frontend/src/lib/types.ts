@@ -17,3 +17,18 @@ export type Invoice = {
   cogs: string;
   status: "DRAFT" | "FINALIZED" | "VOID";
 };
+
+export type UserRole = "admin" | "branch_manager";
+
+export type AuthUser = {
+  user_id: string;
+  name: string;
+  email: string;
+  role: UserRole;
+  branch_id: string | null;
+};
+
+export type LoginResponse = {
+  access_token: string;
+  token_type: "bearer";
+};

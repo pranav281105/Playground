@@ -22,7 +22,7 @@ body {
 .container {
   max-width: 1180px;
   margin: 0 auto;
-  padding: 1rem;
+  padding: 1rem 1rem 2rem;
 }
 
 .card {
@@ -45,16 +45,18 @@ body {
   flex-wrap: wrap;
 }
 
-.nav button {
+.nav a {
+  text-decoration: none;
   border: 0;
   border-radius: 999px;
   padding: 0.5rem 0.9rem;
   cursor: pointer;
   background: #dbe7ff;
   color: #143c8a;
+  font-weight: 600;
 }
 
-.nav button.active {
+.nav a.active {
   background: var(--primary);
   color: #ffffff;
 }
@@ -67,4 +69,109 @@ body {
 .metric-label {
   color: var(--muted);
   font-size: 0.86rem;
+}
+
+.app-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+  margin-bottom: 1rem;
+}
+
+.session-card {
+  min-width: 260px;
+  background: #ffffffcc;
+  border: 1px solid #d9e3f3;
+  border-radius: 12px;
+  padding: 0.7rem 0.8rem;
+}
+
+.session-card p {
+  margin: 0 0 0.35rem;
+  font-size: 0.9rem;
+}
+
+.session-card button {
+  margin-top: 0.25rem;
+  border: 0;
+  background: #e7eefc;
+  color: #1743a1;
+  border-radius: 8px;
+  padding: 0.35rem 0.65rem;
+  cursor: pointer;
+}
+
+.auth-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+}
+
+.auth-card {
+  width: min(100%, 440px);
+  background: #ffffff;
+  border-radius: 16px;
+  box-shadow: 0 10px 36px rgba(17, 24, 39, 0.1);
+  padding: 1.4rem;
+}
+
+.auth-card h1 {
+  margin: 0 0 0.4rem;
+}
+
+.auth-card p {
+  margin: 0 0 1rem;
+  color: var(--muted);
+}
+
+.auth-form {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.auth-form label {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.auth-form input {
+  border: 1px solid #cad7ee;
+  border-radius: 10px;
+  padding: 0.6rem 0.7rem;
+  font-size: 0.95rem;
+}
+
+.auth-form button {
+  margin-top: 0.3rem;
+  border: 0;
+  border-radius: 10px;
+  padding: 0.62rem 0.82rem;
+  background: var(--primary);
+  color: #ffffff;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.auth-form button:disabled {
+  opacity: 0.75;
+  cursor: not-allowed;
+}
+
+.auth-error {
+  margin: 0.2rem 0;
+  font-size: 0.88rem;
+  color: var(--danger);
+}
+
+@media (max-width: 900px) {
+  .app-header {
+    flex-direction: column;
+  }
+
+  .session-card {
+    width: 100%;
+    min-width: 0;
+  }
 }
