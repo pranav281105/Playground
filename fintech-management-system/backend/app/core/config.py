@@ -11,6 +11,13 @@ class Settings(BaseSettings):
     secret_key: str = "replace-me"
     access_token_expire_minutes: int = 60
     database_url: str = "postgresql+psycopg://fintech:fintech@localhost:5432/fintech"
+    auto_create_tables: bool = False
+    request_rate_limit_per_minute: int = 120
+    cors_allow_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+
+    @property
+    def cors_allow_origins_list(self) -> list[str]:
+        return [origin.strip() for origin in self.cors_allow_origins.split(",") if origin.strip()]
 
 
 @lru_cache

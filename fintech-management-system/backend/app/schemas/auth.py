@@ -29,3 +29,5 @@ class UserResponse(BaseModel):
     email: EmailStr
     role: UserRole
     branch_id: uuid.UUID | None
+
+    model_config = {"from_attributes": True}

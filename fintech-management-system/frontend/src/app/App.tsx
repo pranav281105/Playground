@@ -1,37 +1,46 @@
-import { useState } from "react";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
+import { AdminPage } from "../features/admin/AdminPage";
 import { AuthProvider } from "../features/auth/AuthContext";
+import { LoginPage } from "../features/auth/LoginPage";
+import { CostsPage } from "../features/costs/CostsPage";
+import { CustomersPage } from "../features/customers/CustomersPage";
 import { DashboardPage } from "../features/dashboard/DashboardPage";
 import { InvoicesPage } from "../features/invoices/InvoicesPage";
+import { PaymentsPage } from "../features/payments/PaymentsPage";
 import { ReportsPage } from "../features/reports/ReportsPage";
-
-type View = "dashboard" | "invoices" | "reports";
+import { VendorsPage } from "../features/vendors/VendorsPage";
+import { AppShell } from "./AppShell";
+import { ProtectedRoute } from "./ProtectedRoute";
+import { RoleGuard } from "./RoleGuard";
 
 export function App() {
   return (
     <AuthProvider>
-      <RootLayout />
+      <BrowserRouter>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+
+          <Route element={<ProtectedRoute />}>
+            <Route element={<AppShell />}>
+              <Route path="/" element={<Navigate to="/dashboard" replace />} />
+              <Route path="/dashboard" element={<DashboardPage />} />
+              <Route path="/invoices" element={<InvoicesPage />} />
+              <Route path="/costs" element={<CostsPage />} />
+              <Route path="/payments" element={<PaymentsPage />} />
+              <Route path="/customers" element={<CustomersPage />} />
+              <Route path="/vendors" element={<VendorsPage />} />
+              <Route path="/reports" element={<ReportsPage />} />
+
+              <Route element={<RoleGuard role="admin" />}>
+                <Route path="/admin" element={<AdminPage />} />
+              </Route>
+            </Route>
+          </Route>
+
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </BrowserRouter>
     </AuthProvider>
-  );
-}
-
-function RootLayout() {
-  const [view, setView] = useState<View>("dashboard");
-
-  return (
-    <main className="container">
-      <h1>FinTech Management System</h1>
-      <p>Phase 1 MVP console for branch finance operations.</p>
-
-      <nav className="nav">
-        <button className={view === "dashboard" ? "active" : ""} onClick={() => setView("dashboard")}>Dashboard</button>
-        <button className={view === "invoices" ? "active" : ""} onClick={() => setView("invoices")}>Invoices</button>
-        <button className={view === "reports" ? "active" : ""} onClick={() => setView("reports")}>Reports</button>
-      </nav>
-
-      {view === "dashboard" ? <DashboardPage /> : null}
-      {view === "invoices" ? <InvoicesPage /> : null}
-      {view === "reports" ? <ReportsPage /> : null}
-    </main>
   );
 }

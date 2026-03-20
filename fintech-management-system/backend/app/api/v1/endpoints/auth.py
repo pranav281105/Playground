@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.deps import DbSession
+from app.api.deps import CurrentUser, DbSession
 from app.schemas.auth import LoginRequest, TokenResponse, UserCreate, UserResponse
 from app.services.auth_service import AuthService
 
@@ -17,3 +17,8 @@ def register_user(payload: UserCreate, db: DbSession) -> UserResponse:
 def login(payload: LoginRequest, db: DbSession) -> TokenResponse:
     token = AuthService(db).authenticate(payload.email, payload.password)
     return TokenResponse(access_token=token)
+
+
+@router.get("/me", response_model=UserResponse)
+def me(current_user: CurrentUser) -> UserResponse:
+    return UserResponse.model_validate(current_user)

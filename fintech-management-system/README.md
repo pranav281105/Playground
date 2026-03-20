@@ -13,13 +13,34 @@ Production-grade Phase 1 foundation for the Income Statement Web App.
 - Admin-only void invoice flow
 - Deterministic financial formulas (no AI for calculations)
 
-## Run Backend (local)
+## Local Development
+
+### One-time setup
 ```bash
-cd backend
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e .[dev]
-uvicorn app.main:app --reload
+make install
+```
+
+### Run full dev stack
+```bash
+make dev
+```
+
+This command starts:
+- PostgreSQL via Docker Compose (`localhost:5432`)
+- Backend FastAPI server (`http://localhost:8000`)
+- Frontend Vite dev server (`http://localhost:5173`)
+
+Press `Ctrl+C` to stop the frontend and backend. To stop Docker services:
+
+```bash
+make stop
+```
+
+### Run services individually
+```bash
+make dev-db
+make dev-backend
+make dev-frontend
 ```
 
 ## API Docs
