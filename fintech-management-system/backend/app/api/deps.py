@@ -10,7 +10,7 @@ from app.core.config import get_settings
 from app.core.security import decode_access_token
 from app.db.session import get_db
 from app.models.entities import User
-from app.models.enums import UserRole
+from app.models.enums import UserRole, is_owner_role
 
 settings = get_settings()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.api_v1_prefix}/auth/login")
@@ -46,7 +46,7 @@ CurrentUser = Annotated[User, Depends(get_current_user)]
 
 
 def require_admin(current_user: CurrentUser) -> User:
-    if current_user.role != UserRole.ADMIN:
+    if not is_owner_role(current_user.role):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
     return current_user
 
@@ -54,6 +54,8 @@ def require_admin(current_user: CurrentUser) -> User:
 def require_branch_operator(current_user: CurrentUser) -> User:
     if current_user.role == UserRole.BRANCH_MANAGER and current_user.branch_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Branch assignment required")
+    if current_user.role == UserRole.BUSINESS_MANAGER and current_user.business_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Business assignment required")
     return current_user
 
 

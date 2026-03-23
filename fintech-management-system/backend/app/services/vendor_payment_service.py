@@ -5,9 +5,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.entities import User, Vendor, VendorPayment
-from app.models.enums import UserRole
 from app.schemas.vendor_payment import VendorPaymentCreate, VendorPaymentUpdate
 from app.services.financial_engine import quantize_money
+from app.services.scope_service import apply_branch_scope, apply_scope_filters
 
 
 class VendorPaymentService:
@@ -36,10 +36,21 @@ class VendorPaymentService:
         self.db.refresh(payment)
         return payment
 
-    def list_vendor_payments(self, current_user: User) -> list[VendorPayment]:
-        query = select(VendorPayment).order_by(VendorPayment.created_at.desc())
-        if current_user.role != UserRole.ADMIN:
-            query = query.where(VendorPayment.branch_id == current_user.branch_id)
+    def list_vendor_payments(
+        self,
+        current_user: User,
+        *,
+        business_id: uuid.UUID | None = None,
+        branch_id: uuid.UUID | None = None,
+    ) -> list[VendorPayment]:
+        query = apply_scope_filters(
+            select(VendorPayment),
+            db=self.db,
+            current_user=current_user,
+            branch_column=VendorPayment.branch_id,
+            business_id=business_id,
+            branch_id=branch_id,
+        ).order_by(VendorPayment.created_at.desc())
         return list(self.db.execute(query).scalars().all())
 
     def update_vendor_payment(
@@ -48,14 +59,14 @@ class VendorPaymentService:
         payload: VendorPaymentUpdate,
         current_user: User,
     ) -> VendorPayment:
-        payment = self.db.execute(
-            select(VendorPayment).where(VendorPayment.vendor_payment_id == vendor_payment_id)
-        ).scalar_one_or_none()
+        payment_query = apply_branch_scope(
+            select(VendorPayment).where(VendorPayment.vendor_payment_id == vendor_payment_id),
+            current_user,
+            VendorPayment.branch_id,
+        )
+        payment = self.db.execute(payment_query).scalar_one_or_none()
         if not payment:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vendor payment not found")
-
-        if current_user.role != UserRole.ADMIN and payment.branch_id != current_user.branch_id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cross-branch access denied")
 
         update_data = payload.model_dump(exclude_unset=True)
         if "amount" in update_data and update_data["amount"] is not None:

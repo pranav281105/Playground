@@ -32,7 +32,7 @@ export function App() {
               <Route path="/vendors" element={<VendorsPage />} />
               <Route path="/reports" element={<ReportsPage />} />
 
-              <Route element={<RoleGuard role="admin" />}>
+              <Route element={<RoleGuard roles={["admin", "owner"]} />}>
                 <Route path="/admin" element={<AdminPage />} />
               </Route>
             </Route>

@@ -1,4 +1,4 @@
-import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
 
 import { api } from "../../lib/api";
@@ -11,13 +11,6 @@ type ImportSummary = {
   success: number;
   failed: number;
   errors: string[];
-};
-
-type MonthlyProfitRow = {
-  month: string;
-  sales: number;
-  grossProfit: number;
-  cogs: number;
 };
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -35,7 +28,7 @@ function formatMargin(grossProfit: string | number, salesAmount: string | number
   const gross = Number(grossProfit);
   const sales = Number(salesAmount);
   if (!Number.isFinite(gross) || !Number.isFinite(sales) || sales <= 0) {
-    return "#DIV/0!";
+    return "-";
   }
   return `${((gross / sales) * 100).toFixed(1)}%`;
 }
@@ -178,10 +171,12 @@ export function InvoicesPage() {
   const [importing, setImporting] = useState(false);
   const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
   const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
+  const [importFileName, setImportFileName] = useState("No file chosen");
+  const [actionInvoiceId, setActionInvoiceId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  const loadData = () => {
+  const loadData = useCallback(() => {
     Promise.all([api.get<Invoice[]>("/invoices"), api.get<Customer[]>("/customers")])
       .then(([invoiceResponse, customerResponse]) => {
         setInvoices(invoiceResponse.data);
@@ -191,11 +186,11 @@ export function InvoicesPage() {
         }
       })
       .catch((requestError: unknown) => setError(getApiErrorMessage(requestError, "Failed to load invoices")));
-  };
+  }, [customerId]);
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [loadData]);
 
   const customersById = useMemo(
     () => new Map(customers.map((customer) => [customer.customer_id, customer.customer_name])),
@@ -299,8 +294,10 @@ export function InvoicesPage() {
     event.target.value = "";
 
     if (!file) {
+      setImportFileName("No file chosen");
       return;
     }
+    setImportFileName(file.name);
 
     setError(null);
     setSuccess(null);
@@ -418,79 +415,161 @@ export function InvoicesPage() {
     }
   };
 
+  const onDeleteInvoice = async (invoice: Invoice) => {
+    setError(null);
+    setSuccess(null);
+    setActionInvoiceId(invoice.invoice_id);
+    try {
+      await api.delete(`/invoices/${invoice.invoice_id}`);
+      setSuccess(`Invoice ${invoice.invoice_number} deleted.`);
+      loadData();
+    } catch (requestError: unknown) {
+      setError(getApiErrorMessage(requestError, "Failed to delete invoice"));
+    } finally {
+      setActionInvoiceId(null);
+    }
+  };
+
+  const onFinalizeInvoice = async (invoice: Invoice) => {
+    setError(null);
+    setSuccess(null);
+    setActionInvoiceId(invoice.invoice_id);
+    try {
+      await api.post(`/invoices/${invoice.invoice_id}/finalize`, {});
+      setSuccess(`Invoice ${invoice.invoice_number} finalized.`);
+      loadData();
+    } catch (requestError: unknown) {
+      setError(getApiErrorMessage(requestError, "Failed to finalize invoice"));
+    } finally {
+      setActionInvoiceId(null);
+    }
+  };
+
+  const invoiceCountLabel = `${filteredInvoices.length} invoice${filteredInvoices.length === 1 ? "" : "s"}`;
+
   return (
     <div className="stack">
-      <section className="card">
-        <h3>Add Invoice</h3>
-        <form className="inline-form" onSubmit={onSubmit}>
-          <input
-            placeholder="Invoice No."
-            value={invoiceNumber}
-            onChange={(event) => setInvoiceNumber(event.target.value)}
-            required
-          />
-          <input type="date" value={invoiceDate} onChange={(event) => setInvoiceDate(event.target.value)} required />
-          <select value={customerId} onChange={(event) => setCustomerId(event.target.value)} required>
-            <option value="">Select Customer</option>
-            {customers.map((customer) => (
-              <option key={customer.customer_id} value={customer.customer_id}>
-                {customer.customer_name}
-              </option>
-            ))}
-          </select>
-          <input
-            placeholder="Sales Amount Excluding GST (S$)"
-            inputMode="decimal"
-            value={salesAmount}
-            onChange={(event) => setSalesAmount(event.target.value)}
-            required
-          />
-          <input
-            placeholder="Gross Profit (S$)"
-            inputMode="decimal"
-            value={grossProfit}
-            onChange={(event) => setGrossProfit(event.target.value)}
-            required
-          />
-          <input placeholder="Remarks" value={remarks} onChange={(event) => setRemarks(event.target.value)} />
-          <button type="submit" disabled={submitting}>
-            {submitting ? "Saving..." : "Add Invoice"}
-          </button>
-        </form>
-        {error ? <p className="error">{error}</p> : null}
-        {success ? <p>{success}</p> : null}
-      </section>
+      <div>
+        <div className="pg-title">Invoices</div>
+        <div className="pg-meta">POS sales order entry, import, and monthly profitability view.</div>
+      </div>
 
       <section className="card">
-        <h3>Import Invoices (CSV / Excel)</h3>
-        <p>Required columns: Invoice No., Invoice Date, Name of Customer, Sales Amount Excluding GST, Gross Profit.</p>
-        <input type="file" accept=".csv,.xlsx,.xls" onChange={(event) => void onImportFile(event)} disabled={importing} />
-        {importing ? <p>Import in progress...</p> : null}
-        {importSummary ? (
-          <div className="stack">
-            <p>
-              Processed {importSummary.total} rows. Success: {importSummary.success}. Failed: {importSummary.failed}.
-            </p>
-            {importSummary.errors.length > 0 ? (
-              <div>
-                <p className="error">Import errors:</p>
-                {importSummary.errors.slice(0, 20).map((item) => (
-                  <p key={item} className="error">
-                    {item}
-                  </p>
-                ))}
-              </div>
-            ) : null}
+        <div className="card-hd">
+          <div>
+            <div className="card-title">Add Invoice</div>
+            <div className="card-desc">Create a new POS sales order invoice</div>
           </div>
-        ) : null}
+        </div>
+        <div className="card-body">
+          <form className="form-row invoice-form" onSubmit={onSubmit}>
+            <input
+              className="fi"
+              placeholder="Invoice No."
+              value={invoiceNumber}
+              onChange={(event) => setInvoiceNumber(event.target.value)}
+              required
+            />
+            <input
+              className="fi"
+              type={invoiceDate ? "date" : "text"}
+              placeholder="dd/mm/yyyy"
+              value={invoiceDate}
+              onFocus={(event) => {
+                event.currentTarget.type = "date";
+              }}
+              onBlur={(event) => {
+                if (!event.currentTarget.value) {
+                  event.currentTarget.type = "text";
+                }
+              }}
+              onChange={(event) => setInvoiceDate(event.target.value)}
+              required
+            />
+            <select className="fs" value={customerId} onChange={(event) => setCustomerId(event.target.value)} required>
+              <option value="">Name of Customer</option>
+              {customers.map((customer) => (
+                <option key={customer.customer_id} value={customer.customer_id}>
+                  {customer.customer_name}
+                </option>
+              ))}
+            </select>
+            <input
+              className="fi"
+              placeholder="Sales Amount Excl. GST (S$)"
+              inputMode="decimal"
+              value={salesAmount}
+              onChange={(event) => setSalesAmount(event.target.value)}
+              required
+            />
+            <input
+              className="fi"
+              placeholder="Gross Profit (S$)"
+              inputMode="decimal"
+              value={grossProfit}
+              onChange={(event) => setGrossProfit(event.target.value)}
+              required
+            />
+            <input className="fi" placeholder="Remarks" value={remarks} onChange={(event) => setRemarks(event.target.value)} />
+            <button className="btn-add" type="submit" disabled={submitting}>
+              {submitting ? "Saving..." : "Add Invoice"}
+            </button>
+          </form>
+          {success ? <div className="fmsg ok show">{success}</div> : null}
+          {error ? <div className="fmsg err show">{error}</div> : null}
+        </div>
       </section>
 
       <section className="card">
-        <div className="invoice-profit-header">
-          <h3>{`POS Sales Order Profit - Year ${selectedYear}`}</h3>
-          <div className="invoice-profit-controls">
-            <label htmlFor="invoice-year">Year</label>
-            <select id="invoice-year" value={selectedYear} onChange={(event) => setSelectedYear(Number(event.target.value))}>
+        <div className="card-hd">
+          <div>
+            <div className="card-title">Import Invoices (CSV / Excel)</div>
+            <div className="card-desc">Bulk upload — required columns below</div>
+          </div>
+        </div>
+        <div className="card-body">
+          <div className="import-desc">
+            Required columns: <b>Invoice No.</b>, <b>Invoice Date</b>, <b>Name of Customer</b>, <b>Sales Amount Excluding GST</b>, <b>Gross Profit</b>
+          </div>
+          <div className="file-row">
+            <label className="file-lbl" htmlFor="invoice-file-input">
+              Choose file
+            </label>
+            <input
+              className="file-inp"
+              id="invoice-file-input"
+              type="file"
+              accept=".csv,.xlsx,.xls"
+              onChange={(event) => void onImportFile(event)}
+              disabled={importing}
+            />
+            <span className="file-disp">{importing ? "Import in progress..." : importFileName}</span>
+          </div>
+          {importSummary ? (
+            <div className="import-summary">
+              <p>
+                Processed {importSummary.total} rows. Success: {importSummary.success}. Failed: {importSummary.failed}.
+              </p>
+              {importSummary.errors.length > 0
+                ? importSummary.errors.slice(0, 20).map((item) => (
+                    <p key={item} className="fmsg err show">
+                      {item}
+                    </p>
+                  ))
+                : null}
+            </div>
+          ) : null}
+        </div>
+      </section>
+
+      <section>
+        <div className="sec-hd">
+          <div>
+            <div className="sec-title">{`POS Sales Order Profit - Year ${selectedYear}`}</div>
+          </div>
+          <div className="yr-ctrl">
+            <span className="yr-lbl">Year</span>
+            <select className="yr-sel" id="invoice-year" value={selectedYear} onChange={(event) => setSelectedYear(Number(event.target.value))}>
               {availableYears.map((year) => (
                 <option key={year} value={year}>
                   {year}
@@ -500,71 +579,116 @@ export function InvoicesPage() {
           </div>
         </div>
 
-        <div className="invoice-profit-layout">
-          <div className="table-scroll">
-            <table className="data-table invoice-table">
-              <thead>
-                <tr>
-                  <th>S.No</th>
-                  <th>Invoice No.</th>
-                  <th>Invoice Date</th>
-                  <th>Name of Customer</th>
-                  <th>Sales Amount Excluding GST (S$)</th>
-                  <th>Gross Profit (S$)</th>
-                  <th>Cost of Goods Sold in S$</th>
-                  <th>Gross Profit Margin</th>
-                  <th>Remarks</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredInvoices.map((invoice, index) => (
-                  <tr key={invoice.invoice_id}>
-                    <td>{index + 1}</td>
-                    <td>{invoice.invoice_number}</td>
-                    <td>{formatDate(invoice.invoice_date)}</td>
-                    <td>{customersById.get(invoice.customer_id) ?? invoice.customer_id}</td>
-                    <td className="align-right">{formatCurrency(invoice.sales_amount)}</td>
-                    <td className="align-right">{formatCurrency(invoice.gross_profit)}</td>
-                    <td className="align-right">{formatCurrency(invoice.cogs)}</td>
-                    <td className="align-right">{formatMargin(invoice.gross_profit, invoice.sales_amount)}</td>
-                    <td>{invoice.remarks ?? "-"}</td>
+        <div className="tbl-stack">
+          <div className="tbl-card">
+            <div className="tbl-card-hd">
+              <div className="tbl-card-title">Invoice List</div>
+              <div className="tbl-card-meta">{invoiceCountLabel}</div>
+            </div>
+            <div className="tbl-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th className="l">S.No</th>
+                    <th className="l">Invoice No.</th>
+                    <th className="l">Invoice Date</th>
+                    <th className="l">Name of Customer</th>
+                    <th>Sales Amount Excl. GST (S$)</th>
+                    <th>Gross Profit (S$)</th>
+                    <th>Cost of Goods Sold (S$)</th>
+                    <th>Gross Profit Margin</th>
+                    <th className="l">Action</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {filteredInvoices.length === 0 ? (
+                    <tr className="empty">
+                      <td className="l" colSpan={9}>
+                        No invoices for selected year.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredInvoices.map((invoice, index) => (
+                      <tr key={invoice.invoice_id} className="on">
+                        <td className="l">{index + 1}</td>
+                        <td className="l mono">{invoice.invoice_number}</td>
+                        <td className="l">{formatDate(invoice.invoice_date)}</td>
+                        <td className="l hi">{customersById.get(invoice.customer_id) ?? invoice.customer_id}</td>
+                        <td>{formatCurrency(invoice.sales_amount)}</td>
+                        <td>{formatCurrency(invoice.gross_profit)}</td>
+                        <td>{formatCurrency(invoice.cogs)}</td>
+                        <td className="pos">{formatMargin(invoice.gross_profit, invoice.sales_amount)}</td>
+                        <td className="l">
+                          {invoice.status === "DRAFT" ? (
+                            <div className="action-row">
+                              <button
+                                className="del finalize"
+                                type="button"
+                                onClick={() => void onFinalizeInvoice(invoice)}
+                                disabled={actionInvoiceId === invoice.invoice_id}
+                              >
+                                {actionInvoiceId === invoice.invoice_id ? "..." : "Finalize"}
+                              </button>
+                              <button
+                                className="del"
+                                type="button"
+                                onClick={() => void onDeleteInvoice(invoice)}
+                                disabled={actionInvoiceId === invoice.invoice_id}
+                                title="Delete invoice"
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          ) : (
+                            <span className={invoice.status === "FINALIZED" ? "pos" : undefined}>{invoice.status}</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
 
-          <div className="table-scroll">
-            <h4>POS Sales Order Profit by Month</h4>
-            <table className="data-table monthly-profit-table">
-              <thead>
-                <tr>
-                  <th>Month</th>
-                  <th>Sales Amount Excluding GST (S$)</th>
-                  <th>Gross Profit (S$)</th>
-                  <th>Cost of Goods Sold in S$</th>
-                  <th>Gross Profit Margin</th>
-                </tr>
-              </thead>
-              <tbody>
-                {monthlyProfitRows.map((row) => (
-                  <tr key={row.month}>
-                    <td>{row.month}</td>
-                    <td className="align-right">{formatCurrency(row.sales)}</td>
-                    <td className="align-right">{formatCurrency(row.grossProfit)}</td>
-                    <td className="align-right">{formatCurrency(row.cogs)}</td>
-                    <td className="align-right">{formatMargin(row.grossProfit, row.sales)}</td>
+          <div className="tbl-card">
+            <div className="tbl-card-hd">
+              <div className="tbl-card-title">POS Sales Order Profit by Month</div>
+              <div className="tbl-card-meta">{`Year ${selectedYear}`}</div>
+            </div>
+            <div className="tbl-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th className="l">Month</th>
+                    <th>Sales Amount Excl. GST (S$)</th>
+                    <th>Gross Profit (S$)</th>
+                    <th>Cost of Goods Sold (S$)</th>
+                    <th>Gross Profit Margin</th>
                   </tr>
-                ))}
-                <tr className="total-row">
-                  <td>Total</td>
-                  <td className="align-right">{formatCurrency(monthlyTotals.sales)}</td>
-                  <td className="align-right">{formatCurrency(monthlyTotals.grossProfit)}</td>
-                  <td className="align-right">{formatCurrency(monthlyTotals.cogs)}</td>
-                  <td className="align-right">{formatMargin(monthlyTotals.grossProfit, monthlyTotals.sales)}</td>
-                </tr>
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {monthlyProfitRows.map((row) => (
+                    <tr key={row.month} className={row.sales > 0 ? "on" : undefined}>
+                      <td className="l">{row.month}</td>
+                      <td>{row.sales > 0 ? formatCurrency(row.sales) : "-"}</td>
+                      <td>{row.grossProfit > 0 ? formatCurrency(row.grossProfit) : "-"}</td>
+                      <td>{row.sales > 0 ? formatCurrency(row.cogs) : "-"}</td>
+                      <td className={row.sales > 0 ? "pos" : undefined}>{formatMargin(row.grossProfit, row.sales)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <td className="l">Total</td>
+                    <td>{monthlyTotals.sales > 0 ? formatCurrency(monthlyTotals.sales) : "-"}</td>
+                    <td>{monthlyTotals.grossProfit > 0 ? formatCurrency(monthlyTotals.grossProfit) : "-"}</td>
+                    <td>{monthlyTotals.cogs > 0 ? formatCurrency(monthlyTotals.cogs) : "-"}</td>
+                    <td className="pos">{formatMargin(monthlyTotals.grossProfit, monthlyTotals.sales)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
           </div>
         </div>
       </section>

@@ -209,3 +209,112 @@ def test_report_exports_return_csv(client: TestClient) -> None:
         assert response.status_code == 200
         assert "text/csv" in response.headers["content-type"]
         assert "," in response.text
+
+
+def test_second_owner_registration_is_rejected(client: TestClient) -> None:
+    first_owner = client.post(
+        "/api/v1/auth/register",
+        json={
+            "name": "Owner One",
+            "email": "owner.one@example.com",
+            "password": "password123",
+            "role": "owner",
+            "branch_id": None,
+            "business_id": None,
+            "company_id": None,
+        },
+    )
+    assert first_owner.status_code == 200
+
+    second_owner = client.post(
+        "/api/v1/auth/register",
+        json={
+            "name": "Owner Two",
+            "email": "owner.two@example.com",
+            "password": "password123",
+            "role": "owner",
+            "branch_id": None,
+            "business_id": None,
+            "company_id": None,
+        },
+    )
+    assert second_owner.status_code == 409
+    assert second_owner.json()["detail"] == "Only one owner account is allowed"
+
+
+def test_admin_user_scope_assignment_api(client: TestClient) -> None:
+    owner_token, _ = _register_and_login(
+        client,
+        {
+            "name": "Owner Scope",
+            "email": "owner.scope@example.com",
+            "password": "password123",
+            "role": "owner",
+            "branch_id": None,
+            "business_id": None,
+            "company_id": None,
+        },
+    )
+
+    company_response = client.post(
+        "/api/v1/companies",
+        json={"company_name": "ABC Scope"},
+        headers=_auth_header(owner_token),
+    )
+    assert company_response.status_code == 200
+    company_id = company_response.json()["company_id"]
+
+    business_response = client.post(
+        "/api/v1/businesses",
+        json={"company_id": company_id, "business_name": "Biz Scope"},
+        headers=_auth_header(owner_token),
+    )
+    assert business_response.status_code == 200
+    business_id = business_response.json()["business_id"]
+
+    branch_one_response = client.post(
+        "/api/v1/branches",
+        json={"business_id": business_id, "branch_name": "Scope Branch 1", "location": "SG"},
+        headers=_auth_header(owner_token),
+    )
+    assert branch_one_response.status_code == 200
+    branch_one_id = branch_one_response.json()["branch_id"]
+
+    branch_two_response = client.post(
+        "/api/v1/branches",
+        json={"business_id": business_id, "branch_name": "Scope Branch 2", "location": "SG"},
+        headers=_auth_header(owner_token),
+    )
+    assert branch_two_response.status_code == 200
+    branch_two_id = branch_two_response.json()["branch_id"]
+
+    manager_token, manager_user = _register_and_login(
+        client,
+        {
+            "name": "Scoped Branch Manager",
+            "email": "scope.manager@example.com",
+            "password": "password123",
+            "role": "branch_manager",
+            "branch_id": branch_one_id,
+            "business_id": None,
+            "company_id": None,
+        },
+    )
+
+    list_users_response = client.get("/api/v1/users", headers=_auth_header(owner_token))
+    assert list_users_response.status_code == 200
+    user_ids = {row["user_id"] for row in list_users_response.json()}
+    assert manager_user["user_id"] in user_ids
+
+    forbidden_response = client.get("/api/v1/users", headers=_auth_header(manager_token))
+    assert forbidden_response.status_code == 403
+
+    update_scope_response = client.patch(
+        f"/api/v1/users/{manager_user['user_id']}/scope",
+        json={"branch_id": branch_two_id, "business_id": business_id, "company_id": company_id},
+        headers=_auth_header(owner_token),
+    )
+    assert update_scope_response.status_code == 200
+    assert update_scope_response.json()["branch_id"] == branch_two_id
+    assert update_scope_response.json()["business_id"] == business_id
+    assert update_scope_response.json()["company_id"] == company_id

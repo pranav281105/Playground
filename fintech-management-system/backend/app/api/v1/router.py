@@ -3,13 +3,16 @@ from fastapi import APIRouter
 from app.api.v1.endpoints import (
     audit_logs,
     auth,
+    businesses,
     branches,
+    companies,
     costs,
     customers,
     dashboard,
     invoices,
     payments,
     reports,
+    users,
     vendor_payments,
     vendors,
 )
@@ -21,6 +24,8 @@ def api_root() -> dict[str, str]:
 
 
 api_router.include_router(auth.router)
+api_router.include_router(companies.router)
+api_router.include_router(businesses.router)
 api_router.include_router(branches.router)
 api_router.include_router(customers.router)
 api_router.include_router(invoices.router)
@@ -31,3 +36,4 @@ api_router.include_router(reports.router)
 api_router.include_router(vendors.router)
 api_router.include_router(vendor_payments.router)
 api_router.include_router(audit_logs.router)
+api_router.include_router(users.router)

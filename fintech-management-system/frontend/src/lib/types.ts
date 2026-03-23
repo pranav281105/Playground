@@ -1,10 +1,12 @@
-export type UserRole = "admin" | "branch_manager";
+export type UserRole = "owner" | "admin" | "business_manager" | "branch_manager";
 
 export type AuthUser = {
   user_id: string;
   name: string;
   email: string;
   role: UserRole;
+  company_id: string | null;
+  business_id: string | null;
   branch_id: string | null;
 };
 
@@ -31,6 +33,16 @@ export type RevenueTrendPoint = {
 export type CostBreakdownPoint = {
   category: string;
   amount: string;
+};
+
+export type BusinessPerformancePoint = {
+  business_id: string;
+  business_name: string;
+  revenue: string;
+  gross_profit: string;
+  total_costs: string;
+  net_income: string;
+  gross_profit_margin: string;
 };
 
 export type Invoice = {
@@ -138,8 +150,20 @@ export type CashFlowReport = {
 
 export type Branch = {
   branch_id: string;
+  business_id: string | null;
   branch_name: string;
   location: string | null;
+};
+
+export type Company = {
+  company_id: string;
+  company_name: string;
+};
+
+export type Business = {
+  business_id: string;
+  company_id: string;
+  business_name: string;
 };
 
 export type AuditLog = {

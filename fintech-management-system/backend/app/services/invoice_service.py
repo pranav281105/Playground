@@ -6,10 +6,11 @@ from sqlalchemy import Select, select
 from sqlalchemy.orm import Session
 
 from app.models.entities import Customer, Invoice, User
-from app.models.enums import InvoiceStatus, UserRole
+from app.models.enums import InvoiceStatus, UserRole, is_owner_role
 from app.schemas.invoice import InvoiceCreate, InvoiceUpdateDraft
 from app.services.access_control import ensure_branch_access
 from app.services.financial_engine import quantize_money
+from app.services.scope_service import apply_branch_scope, branch_scope_predicate
 
 
 def validate_lifecycle_transition(
@@ -26,7 +27,7 @@ def validate_lifecycle_transition(
         return
 
     if target_status == InvoiceStatus.VOID:
-        if user_role != UserRole.ADMIN:
+        if not is_owner_role(user_role):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only admin can void invoices")
         if current_status != InvoiceStatus.FINALIZED:
             raise HTTPException(
@@ -44,9 +45,7 @@ class InvoiceService:
 
     def _invoice_query_for_user(self, current_user: User) -> Select[tuple[Invoice]]:
         query: Select[tuple[Invoice]] = select(Invoice)
-        if current_user.role == UserRole.ADMIN:
-            return query
-        return query.where(Invoice.branch_id == current_user.branch_id)
+        return apply_branch_scope(query, current_user, Invoice.branch_id)
 
     def list_invoices(self, current_user: User) -> list[Invoice]:
         query = self._invoice_query_for_user(current_user).order_by(Invoice.created_at.desc())
@@ -61,20 +60,11 @@ class InvoiceService:
         return invoice
 
     def create_invoice(self, payload: InvoiceCreate, current_user: User) -> Invoice:
-        branch_id = current_user.branch_id
-        if current_user.role == UserRole.ADMIN:
-            customer = self.db.execute(
-                select(Customer).where(Customer.customer_id == payload.customer_id)
-            ).scalar_one_or_none()
-        else:
-            if branch_id is None:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing user branch")
-            customer = self.db.execute(
-                select(Customer).where(
-                    Customer.customer_id == payload.customer_id,
-                    Customer.branch_id == branch_id,
-                )
-            ).scalar_one_or_none()
+        customer_query = select(Customer).where(Customer.customer_id == payload.customer_id)
+        customer_branch_scope = branch_scope_predicate(current_user, Customer.branch_id)
+        if customer_branch_scope is not None:
+            customer_query = customer_query.where(customer_branch_scope)
+        customer = self.db.execute(customer_query).scalar_one_or_none()
 
         if not customer:
             raise HTTPException(

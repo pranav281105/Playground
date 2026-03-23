@@ -1,10 +1,11 @@
 import { Navigate, Outlet } from "react-router-dom";
 
 import { useAuth } from "../features/auth/AuthContext";
+import type { UserRole } from "../lib/types";
 
-export function RoleGuard({ role }: { role: "admin" | "branch_manager" }) {
+export function RoleGuard({ roles }: { roles: UserRole[] }) {
   const { user } = useAuth();
-  if (!user || user.role !== role) {
+  if (!user || !roles.includes(user.role)) {
     return <Navigate to="/dashboard" replace />;
   }
   return <Outlet />;

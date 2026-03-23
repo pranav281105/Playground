@@ -16,10 +16,21 @@ class AuthService:
         existing = self.db.execute(select(User).where(User.email == payload.email)).scalar_one_or_none()
         if existing:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already in use")
+        if payload.role == UserRole.OWNER:
+            existing_owner = self.db.execute(
+                select(User.user_id).where(User.role == UserRole.OWNER)
+            ).scalar_one_or_none()
+            if existing_owner is not None:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Only one owner account is allowed")
         if payload.role == UserRole.BRANCH_MANAGER and payload.branch_id is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Branch manager must be assigned to a branch",
+            )
+        if payload.role == UserRole.BUSINESS_MANAGER and payload.business_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Business manager must be assigned to a business",
             )
 
         user = User(
@@ -27,6 +38,8 @@ class AuthService:
             email=payload.email,
             password_hash=get_password_hash(payload.password),
             role=payload.role,
+            company_id=payload.company_id,
+            business_id=payload.business_id,
             branch_id=payload.branch_id,
         )
         self.db.add(user)

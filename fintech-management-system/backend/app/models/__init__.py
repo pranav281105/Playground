@@ -1,9 +1,25 @@
-from app.models.entities import AuditLog, Branch, Customer, FailureCost, FixedCost, Invoice, Payment, User, VariableCost, Vendor, VendorPayment
+from app.models.entities import (
+    AuditLog,
+    Branch,
+    Business,
+    Company,
+    Customer,
+    FailureCost,
+    FixedCost,
+    Invoice,
+    Payment,
+    User,
+    VariableCost,
+    Vendor,
+    VendorPayment,
+)
 from app.models.enums import FailureType, InvoiceStatus, PaymentMethod, RecordStatus, UserRole
 
 __all__ = [
     "AuditLog",
     "Branch",
+    "Business",
+    "Company",
     "Customer",
     "FailureCost",
     "FailureType",

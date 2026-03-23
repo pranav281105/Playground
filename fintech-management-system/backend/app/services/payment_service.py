@@ -1,14 +1,15 @@
 from decimal import Decimal
+import uuid
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.entities import Invoice, Payment, User
-from app.models.enums import InvoiceStatus, UserRole
+from app.models.enums import InvoiceStatus
 from app.schemas.payment import PaymentCreate
-from app.services.access_control import ensure_branch_access
 from app.services.financial_engine import quantize_money
+from app.services.scope_service import apply_branch_scope, apply_scope_filters
 
 
 class PaymentService:
@@ -16,11 +17,14 @@ class PaymentService:
         self.db = db
 
     def create_payment(self, payload: PaymentCreate, current_user: User) -> Payment:
-        invoice = self.db.execute(select(Invoice).where(Invoice.invoice_id == payload.invoice_id)).scalar_one_or_none()
+        invoice_query = apply_branch_scope(
+            select(Invoice).where(Invoice.invoice_id == payload.invoice_id),
+            current_user,
+            Invoice.branch_id,
+        )
+        invoice = self.db.execute(invoice_query).scalar_one_or_none()
         if not invoice:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
-
-        ensure_branch_access(current_user, invoice.branch_id)
 
         if invoice.status != InvoiceStatus.FINALIZED:
             raise HTTPException(
@@ -55,8 +59,19 @@ class PaymentService:
         self.db.refresh(payment)
         return payment
 
-    def list_payments(self, current_user: User) -> list[Payment]:
-        query = select(Payment).join(Invoice, Payment.invoice_id == Invoice.invoice_id)
-        if current_user.branch_id is not None and current_user.role != UserRole.ADMIN:
-            query = query.where(Invoice.branch_id == current_user.branch_id)
+    def list_payments(
+        self,
+        current_user: User,
+        *,
+        business_id: uuid.UUID | None = None,
+        branch_id: uuid.UUID | None = None,
+    ) -> list[Payment]:
+        query = apply_scope_filters(
+            select(Payment).join(Invoice, Payment.invoice_id == Invoice.invoice_id),
+            db=self.db,
+            current_user=current_user,
+            branch_column=Invoice.branch_id,
+            business_id=business_id,
+            branch_id=branch_id,
+        )
         return list(self.db.execute(query.order_by(Payment.created_at.desc())).scalars().all())

@@ -83,6 +83,7 @@ export function PaymentsPage() {
   const [vendorBillNumber, setVendorBillNumber] = useState("");
 
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
 
   const canCreateVendorPayment = Boolean(user?.branch_id);
 
@@ -254,6 +255,7 @@ export function PaymentsPage() {
   const submitReceivable = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
+    setSuccess(null);
 
     if (!invoiceId) {
       setError("Select a finalized invoice to record payment.");
@@ -273,6 +275,7 @@ export function PaymentsPage() {
       setInvoiceDate("");
       setReceivableMethod("bank_transfer");
       setReceivableReference("");
+      setSuccess("Payment received recorded.");
       loadData();
     } catch (requestError: unknown) {
       setError(getApiErrorMessage(requestError, "Failed to record payment received"));
@@ -282,6 +285,7 @@ export function PaymentsPage() {
   const submitPayable = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
+    setSuccess(null);
 
     if (!canCreateVendorPayment) {
       setError("Payments paid recording requires a user assigned to a branch.");
@@ -301,22 +305,26 @@ export function PaymentsPage() {
       setVendorDate("");
       setVendorMethod("bank_transfer");
       setVendorBillNumber("");
+      setSuccess("Payment paid recorded.");
       loadData();
     } catch (requestError: unknown) {
       setError(getApiErrorMessage(requestError, "Failed to record payment paid"));
     }
   };
 
+  const receivedCountLabel = `${receivedRows.length} entr${receivedRows.length === 1 ? "y" : "ies"}`;
+  const paidCountLabel = `${filteredVendorPayments.length} entr${filteredVendorPayments.length === 1 ? "y" : "ies"}`;
+
   return (
     <div className="stack">
-      <section className="card payment-page-header">
+      <div className="pg-head">
         <div>
-          <h3>Payments</h3>
-          <p>Track payments received and payments paid.</p>
+          <div className="pg-title">Payments</div>
+          <div className="pg-meta">Track payments received and payments paid.</div>
         </div>
-        <div className="payment-page-controls">
-          <label htmlFor="payment-year">Year</label>
-          <select id="payment-year" value={selectedYear} onChange={(event) => setSelectedYear(Number(event.target.value))}>
+        <div className="yr-ctrl">
+          <span className="yr-lbl">Year</span>
+          <select className="yr-sel" id="payment-year" value={selectedYear} onChange={(event) => setSelectedYear(Number(event.target.value))}>
             {availableYears.map((year) => (
               <option key={year} value={year}>
                 {year}
@@ -324,197 +332,319 @@ export function PaymentsPage() {
             ))}
           </select>
         </div>
-      </section>
+      </div>
 
-      {error ? <div className="card error">{error}</div> : null}
+      {error ? <div className="fmsg err show">{error}</div> : null}
+      {success ? <div className="fmsg ok show">{success}</div> : null}
 
-      <section className="card payment-sheet received">
-        <h3>{`Payments Received - Year ${selectedYear}`}</h3>
-        <form className="inline-form" onSubmit={submitReceivable}>
-          <select value={invoiceId} onChange={(event) => selectReceivableInvoice(event.target.value)} required>
-            <option value="">Select Finalized Invoice</option>
-            {receivableInvoices.map((invoice) => (
-              <option key={invoice.invoice_id} value={invoice.invoice_id}>
-                {invoice.invoice_number} ({formatCurrency(invoice.sales_amount)})
-              </option>
-            ))}
-          </select>
-          <input placeholder="Invoice Amount (S$)" value={invoiceAmount} readOnly required />
-          <select value={receivableMethod} onChange={(event) => setReceivableMethod(event.target.value as PaymentMethod)}>
-            {PAYMENT_METHOD_OPTIONS.map((item) => (
-              <option key={item.value} value={item.value}>
-                {item.label}
-              </option>
-            ))}
-          </select>
-          <input type="date" value={invoiceDate} onChange={(event) => setInvoiceDate(event.target.value)} required />
-          <input
-            placeholder="Remarks / Ref"
-            value={receivableReference}
-            onChange={(event) => setReceivableReference(event.target.value)}
-          />
-          <button type="submit" disabled={receivableInvoices.length === 0}>
-            Record Received
-          </button>
-        </form>
-        {receivableInvoices.length === 0 ? <p>All finalized invoices are already paid.</p> : null}
+      <section className="pay-section">
+        <div className="section-label">
+          <div className="section-title">{`Payments Received - Year ${selectedYear}`}</div>
+        </div>
 
-        <div className="payment-sheet-layout">
-          <div className="table-scroll">
-            <table className="data-table payment-ledger-table">
-              <thead>
-                <tr>
-                  <th>S.No</th>
-                  <th>Invoice No.</th>
-                  <th>Invoice Date</th>
-                  <th>Customer</th>
-                  <th>Invoice Amount (S$)</th>
-                  <th>MOP</th>
-                  <th>Payment Received Date</th>
-                  <th>Status</th>
-                  <th>Remarks</th>
-                </tr>
-              </thead>
-              <tbody>
-                {receivedRows.map((row, index) => (
-                  <tr key={row.payment.payment_id}>
-                    <td>{index + 1}</td>
-                    <td>{row.invoice.invoice_number}</td>
-                    <td>{formatDate(row.invoice.invoice_date)}</td>
-                    <td>{customersById.get(row.invoice.customer_id) ?? "-"}</td>
-                    <td className="align-right">{formatCurrency(row.invoice.sales_amount)}</td>
-                    <td>{paymentMethodLabel(row.payment.payment_method)}</td>
-                    <td>{formatDate(row.payment.payment_date)}</td>
-                    <td>Paid</td>
-                    <td>{row.payment.reference_number ?? row.invoice.remarks ?? "-"}</td>
-                  </tr>
+        <div className="form-card">
+          <div className="form-body">
+            <form className="form-row" onSubmit={submitReceivable}>
+              <select
+                className="fs"
+                style={{ width: "220px" }}
+                value={invoiceId}
+                onChange={(event) => selectReceivableInvoice(event.target.value)}
+                required
+              >
+                <option value="">Select Finalized Invoice</option>
+                {receivableInvoices.map((invoice) => (
+                  <option key={invoice.invoice_id} value={invoice.invoice_id}>
+                    {invoice.invoice_number}
+                  </option>
                 ))}
-              </tbody>
-            </table>
+              </select>
+              <input className="fi" style={{ width: "168px" }} placeholder="Invoice Amount (S$)" value={invoiceAmount} readOnly required />
+              <select
+                className="fs"
+                style={{ width: "168px" }}
+                value={receivableMethod}
+                onChange={(event) => setReceivableMethod(event.target.value as PaymentMethod)}
+              >
+                {PAYMENT_METHOD_OPTIONS.map((item) => (
+                  <option key={item.value} value={item.value}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+              <input
+                className="fi"
+                style={{ width: "148px" }}
+                type={invoiceDate ? "date" : "text"}
+                placeholder="dd/mm/yyyy"
+                value={invoiceDate}
+                onFocus={(event) => {
+                  event.currentTarget.type = "date";
+                }}
+                onBlur={(event) => {
+                  if (!event.currentTarget.value) {
+                    event.currentTarget.type = "text";
+                  }
+                }}
+                onChange={(event) => setInvoiceDate(event.target.value)}
+                required
+              />
+              <input
+                className="fi"
+                style={{ flex: 1, minWidth: "120px" }}
+                placeholder="Remarks / Ref"
+                value={receivableReference}
+                onChange={(event) => setReceivableReference(event.target.value)}
+              />
+              <button className="btn btn-green" type="submit" disabled={receivableInvoices.length === 0}>
+                Record Received
+              </button>
+            </form>
+            <div className="form-hint" style={{ marginTop: "10px" }}>
+              {receivableInvoices.length === 0 ? "All finalized invoices are already paid." : `${receivableInvoices.length} finalized invoice(s) available.`}
+            </div>
+          </div>
+        </div>
+
+        <div className="tbl-row received">
+          <div className="tbl-pane">
+            <div className="pane-hd">
+              <div className="pane-title">Received Entries</div>
+              <div className="pane-meta">{receivedCountLabel}</div>
+            </div>
+            <div className="tscroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th className="l">S.No</th>
+                    <th className="l">Invoice No.</th>
+                    <th className="l">Invoice Date</th>
+                    <th className="l">Customer</th>
+                    <th>Invoice Amount (S$)</th>
+                    <th className="l">MOP</th>
+                    <th className="l">Payment Received Date</th>
+                    <th className="l">Status</th>
+                    <th className="l">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {receivedRows.length === 0 ? (
+                    <tr className="empty">
+                      <td className="l" colSpan={9}>
+                        No payments recorded yet.
+                      </td>
+                    </tr>
+                  ) : (
+                    receivedRows.map((row, index) => (
+                      <tr key={row.payment.payment_id} className="on">
+                        <td className="l">{index + 1}</td>
+                        <td className="l mono">{row.invoice.invoice_number}</td>
+                        <td className="l">{formatDate(row.invoice.invoice_date)}</td>
+                        <td className="l hi">{customersById.get(row.invoice.customer_id) ?? "-"}</td>
+                        <td>{formatCurrency(row.invoice.sales_amount)}</td>
+                        <td className="l">{paymentMethodLabel(row.payment.payment_method)}</td>
+                        <td className="l">{formatDate(row.payment.payment_date)}</td>
+                        <td className="l">
+                          <span className="pill pill-green">Paid</span>
+                        </td>
+                        <td className="l">-</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
 
-          <div className="table-scroll">
-            <h4>Payments by Month</h4>
-            <table className="data-table payment-summary-table">
-              <thead>
-                <tr>
-                  <th>Month</th>
-                  <th>Invoice Amount (S$)</th>
-                  <th>Paid (S$)</th>
-                  <th>Not Paid (S$)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {receivedMonthlyRows.map((row) => (
-                  <tr key={row.month}>
-                    <td>{row.month}</td>
-                    <td className="align-right">{formatCurrency(row.invoiceAmount)}</td>
-                    <td className="align-right">{formatCurrency(row.paid)}</td>
-                    <td className="align-right">{formatCurrency(row.notPaid)}</td>
+          <div className="tbl-pane">
+            <div className="pane-hd">
+              <div className="pane-title">Payments by Month</div>
+            </div>
+            <div className="tscroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th className="l">Month</th>
+                    <th>Invoice Amt (S$)</th>
+                    <th>Paid (S$)</th>
+                    <th>Not Paid (S$)</th>
                   </tr>
-                ))}
-                <tr className="total-row">
-                  <td>Total</td>
-                  <td className="align-right">{formatCurrency(receivedTotals.invoiceAmount)}</td>
-                  <td className="align-right">{formatCurrency(receivedTotals.paid)}</td>
-                  <td className="align-right">{formatCurrency(receivedTotals.notPaid)}</td>
-                </tr>
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {receivedMonthlyRows.map((row) => (
+                    <tr key={row.month} className={row.invoiceAmount > 0 ? "on" : undefined}>
+                      <td className="l">{row.month}</td>
+                      <td>{row.invoiceAmount > 0 ? formatCurrency(row.invoiceAmount) : "-"}</td>
+                      <td className={row.paid > 0 ? "pos" : undefined}>{row.paid > 0 ? formatCurrency(row.paid) : "-"}</td>
+                      <td className={row.notPaid > 0 ? "neg" : undefined}>{row.notPaid > 0 ? formatCurrency(row.notPaid) : "-"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <td className="l">Total</td>
+                    <td>{receivedTotals.invoiceAmount > 0 ? formatCurrency(receivedTotals.invoiceAmount) : "-"}</td>
+                    <td className="pos">{receivedTotals.paid > 0 ? formatCurrency(receivedTotals.paid) : "-"}</td>
+                    <td>{receivedTotals.notPaid > 0 ? formatCurrency(receivedTotals.notPaid) : "-"}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
           </div>
         </div>
       </section>
 
-      <section className="card payment-sheet paid">
-        <h3>{`Payments Paid - Year ${selectedYear}`}</h3>
-        {canCreateVendorPayment ? (
-          <form className="inline-form" onSubmit={submitPayable}>
-            <select value={vendorId} onChange={(event) => setVendorId(event.target.value)} required>
-              <option value="">Select Vendor</option>
-              {vendors.map((vendor) => (
-                <option key={vendor.vendor_id} value={vendor.vendor_id}>
-                  {vendor.vendor_name}
-                </option>
-              ))}
-            </select>
-            <input
-              placeholder="Amount (S$)"
-              inputMode="decimal"
-              value={vendorAmount}
-              onChange={(event) => setVendorAmount(event.target.value)}
-              required
-            />
-            <select value={vendorMethod} onChange={(event) => setVendorMethod(event.target.value as PaymentMethod)}>
-              {PAYMENT_METHOD_OPTIONS.map((item) => (
-                <option key={item.value} value={item.value}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
-            <input type="date" value={vendorDate} onChange={(event) => setVendorDate(event.target.value)} required />
-            <input
-              placeholder="Bill No. / Remarks"
-              value={vendorBillNumber}
-              onChange={(event) => setVendorBillNumber(event.target.value)}
-            />
-            <button type="submit">Record Paid</button>
-          </form>
-        ) : (
-          <p>Payments paid recording is disabled for users without a branch assignment.</p>
-        )}
+      <section className="pay-section">
+        <div className="section-label">
+          <div className="section-title">{`Payments Paid - Year ${selectedYear}`}</div>
+        </div>
 
-        <div className="payment-sheet-layout">
-          <div className="table-scroll">
-            <table className="data-table payment-ledger-table">
-              <thead>
-                <tr>
-                  <th>S.No</th>
-                  <th>Vendor</th>
-                  <th>Payment Date</th>
-                  <th>Amount (S$)</th>
-                  <th>MOP</th>
-                  <th>Status</th>
-                  <th>Remarks</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredVendorPayments.map((item, index) => (
-                  <tr key={item.vendor_payment_id}>
-                    <td>{index + 1}</td>
-                    <td>{vendorsById.get(item.vendor_id)?.vendor_name ?? "-"}</td>
-                    <td>{formatDate(item.payment_date)}</td>
-                    <td className="align-right">{formatCurrency(item.amount)}</td>
-                    <td>{paymentMethodLabel(item.payment_method)}</td>
-                    <td>Paid</td>
-                    <td>{item.bill_number ?? "-"}</td>
+        <div className="form-card">
+          <div className="form-body">
+            {canCreateVendorPayment ? (
+              <form className="form-row" onSubmit={submitPayable}>
+                <select className="fs" style={{ width: "200px" }} value={vendorId} onChange={(event) => setVendorId(event.target.value)} required>
+                  <option value="">Select Vendor</option>
+                  {vendors.map((vendor) => (
+                    <option key={vendor.vendor_id} value={vendor.vendor_id}>
+                      {vendor.vendor_name}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  className="fi"
+                  style={{ width: "148px" }}
+                  placeholder="Amount (S$)"
+                  inputMode="decimal"
+                  value={vendorAmount}
+                  onChange={(event) => setVendorAmount(event.target.value)}
+                  required
+                />
+                <select
+                  className="fs"
+                  style={{ width: "168px" }}
+                  value={vendorMethod}
+                  onChange={(event) => setVendorMethod(event.target.value as PaymentMethod)}
+                >
+                  {PAYMENT_METHOD_OPTIONS.map((item) => (
+                    <option key={item.value} value={item.value}>
+                      {item.label}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  className="fi"
+                  style={{ width: "148px" }}
+                  type={vendorDate ? "date" : "text"}
+                  placeholder="dd/mm/yyyy"
+                  value={vendorDate}
+                  onFocus={(event) => {
+                    event.currentTarget.type = "date";
+                  }}
+                  onBlur={(event) => {
+                    if (!event.currentTarget.value) {
+                      event.currentTarget.type = "text";
+                    }
+                  }}
+                  onChange={(event) => setVendorDate(event.target.value)}
+                  required
+                />
+                <input
+                  className="fi"
+                  style={{ flex: 1, minWidth: "120px" }}
+                  placeholder="Bill No. / Remarks"
+                  value={vendorBillNumber}
+                  onChange={(event) => setVendorBillNumber(event.target.value)}
+                />
+                <button className="btn btn-blue" type="submit">
+                  Record Paid
+                </button>
+              </form>
+            ) : (
+              <div className="form-hint">Payments paid recording is disabled for users without a branch assignment.</div>
+            )}
+          </div>
+        </div>
+
+        <div className="tbl-row paid">
+          <div className="tbl-pane">
+            <div className="pane-hd">
+              <div className="pane-title">Paid Entries</div>
+              <div className="pane-meta">{paidCountLabel}</div>
+            </div>
+            <div className="tscroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th className="l">S.No</th>
+                    <th className="l">Vendor</th>
+                    <th className="l">Payment Date</th>
+                    <th>Amount (S$)</th>
+                    <th className="l">MOP</th>
+                    <th className="l">Status</th>
+                    <th className="l">Remarks</th>
+                    <th className="l">Action</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {filteredVendorPayments.length === 0 ? (
+                    <tr className="empty">
+                      <td className="l" colSpan={8}>
+                        No payments recorded yet.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredVendorPayments.map((item, index) => (
+                      <tr key={item.vendor_payment_id} className="on">
+                        <td className="l">{index + 1}</td>
+                        <td className="l hi">{vendorsById.get(item.vendor_id)?.vendor_name ?? "-"}</td>
+                        <td className="l">{formatDate(item.payment_date)}</td>
+                        <td>{formatCurrency(item.amount)}</td>
+                        <td className="l">{paymentMethodLabel(item.payment_method)}</td>
+                        <td className="l">
+                          <span className="pill pill-green">Paid</span>
+                        </td>
+                        <td className="l">{item.bill_number ?? "-"}</td>
+                        <td className="l">-</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
 
-          <div className="table-scroll">
-            <h4>Payments by Month</h4>
-            <table className="data-table payment-summary-table">
-              <thead>
-                <tr>
-                  <th>Month</th>
-                  <th>Paid (S$)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {MONTHS.map((month, index) => (
-                  <tr key={month}>
-                    <td>{month}</td>
-                    <td className="align-right">{formatCurrency(paidMonthlyTotals[index] ?? 0)}</td>
+          <div className="tbl-pane">
+            <div className="pane-hd">
+              <div className="pane-title">Payments by Month</div>
+            </div>
+            <div className="tscroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th className="l">Month</th>
+                    <th>Paid (S$)</th>
                   </tr>
-                ))}
-                <tr className="total-row">
-                  <td>Total</td>
-                  <td className="align-right">{formatCurrency(sum(paidMonthlyTotals))}</td>
-                </tr>
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {MONTHS.map((month, index) => {
+                    const value = paidMonthlyTotals[index] ?? 0;
+                    return (
+                      <tr key={month} className={value > 0 ? "on" : undefined}>
+                        <td className="l">{month}</td>
+                        <td className={value > 0 ? "neg" : undefined}>{value > 0 ? formatCurrency(value) : "-"}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <td className="l">Total</td>
+                    <td className="neg">{sum(paidMonthlyTotals) > 0 ? formatCurrency(sum(paidMonthlyTotals)) : "-"}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
           </div>
         </div>
       </section>

@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 
 from app.api.deps import CurrentUser, DbSession
 from app.schemas.vendor_payment import (
@@ -15,8 +15,17 @@ router = APIRouter(prefix="/vendor-payments", tags=["vendor-payments"])
 
 
 @router.get("", response_model=list[VendorPaymentResponse])
-def list_vendor_payments(db: DbSession, current_user: CurrentUser) -> list[VendorPaymentResponse]:
-    items = VendorPaymentService(db).list_vendor_payments(current_user)
+def list_vendor_payments(
+    db: DbSession,
+    current_user: CurrentUser,
+    business_id: uuid.UUID | None = Query(default=None),
+    branch_id: uuid.UUID | None = Query(default=None),
+) -> list[VendorPaymentResponse]:
+    items = VendorPaymentService(db).list_vendor_payments(
+        current_user,
+        business_id=business_id,
+        branch_id=branch_id,
+    )
     return [VendorPaymentResponse.model_validate(item) for item in items]
 
 

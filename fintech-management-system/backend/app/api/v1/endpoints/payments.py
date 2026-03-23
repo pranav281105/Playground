@@ -1,4 +1,6 @@
-from fastapi import APIRouter
+import uuid
+
+from fastapi import APIRouter, Query
 
 from app.api.deps import CurrentUser, DbSession
 from app.schemas.payment import PaymentCreate, PaymentResponse
@@ -23,6 +25,11 @@ def create_payment(payload: PaymentCreate, db: DbSession, current_user: CurrentU
 
 
 @router.get("", response_model=list[PaymentResponse])
-def list_payments(db: DbSession, current_user: CurrentUser) -> list[PaymentResponse]:
-    payments = PaymentService(db).list_payments(current_user)
+def list_payments(
+    db: DbSession,
+    current_user: CurrentUser,
+    business_id: uuid.UUID | None = Query(default=None),
+    branch_id: uuid.UUID | None = Query(default=None),
+) -> list[PaymentResponse]:
+    payments = PaymentService(db).list_payments(current_user, business_id=business_id, branch_id=branch_id)
     return [PaymentResponse.model_validate(payment) for payment in payments]
