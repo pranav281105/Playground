@@ -1,4 +1,5 @@
 import uuid
+from datetime import date
 from decimal import Decimal
 
 from fastapi import HTTPException, status
@@ -43,6 +44,19 @@ class InvoiceService:
     def __init__(self, db: Session):
         self.db = db
 
+    def _generate_invoice_number(self, invoice_date: date) -> str:
+        prefix = f"INV-{invoice_date.year}-"
+        existing_numbers = self.db.execute(
+            select(Invoice.invoice_number).where(Invoice.invoice_number.like(f"{prefix}%"))
+        ).scalars()
+
+        next_sequence = 1
+        for value in existing_numbers:
+            suffix = value[len(prefix) :]
+            if suffix.isdigit():
+                next_sequence = max(next_sequence, int(suffix) + 1)
+        return f"{prefix}{next_sequence:03d}"
+
     def _invoice_query_for_user(self, current_user: User) -> Select[tuple[Invoice]]:
         query: Select[tuple[Invoice]] = select(Invoice)
         return apply_branch_scope(query, current_user, Invoice.branch_id)
@@ -75,14 +89,16 @@ class InvoiceService:
         selected_branch_id = customer.branch_id
         ensure_branch_access(current_user, selected_branch_id)
 
-        existing = self.db.execute(
-            select(Invoice).where(Invoice.invoice_number == payload.invoice_number)
-        ).scalar_one_or_none()
+        invoice_number = payload.invoice_number.strip() if payload.invoice_number else ""
+        if not invoice_number:
+            invoice_number = self._generate_invoice_number(payload.invoice_date)
+
+        existing = self.db.execute(select(Invoice).where(Invoice.invoice_number == invoice_number)).scalar_one_or_none()
         if existing:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Invoice number already exists")
 
         invoice = Invoice(
-            invoice_number=payload.invoice_number,
+            invoice_number=invoice_number,
             lazada_order_id=payload.lazada_order_id,
             branch_id=selected_branch_id,
             customer_id=payload.customer_id,

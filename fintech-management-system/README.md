@@ -46,5 +46,8 @@ make dev-frontend
 ## API Docs
 - Swagger: `http://localhost:8000/docs`
 
+## New Laptop Setup
+- Step-by-step setup/run guide: `docs/local-setup-guide.md`
+
 ## Note
 This repo implements the core MVP architecture and rules from PRD/FRD/SAD and `CLAUDE (F).md`.

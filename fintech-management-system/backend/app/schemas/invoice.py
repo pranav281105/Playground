@@ -8,7 +8,7 @@ from app.models.enums import InvoiceStatus
 
 
 class InvoiceCreate(BaseModel):
-    invoice_number: str = Field(min_length=1, max_length=64)
+    invoice_number: str | None = Field(default=None, min_length=1, max_length=64)
     lazada_order_id: str | None = Field(default=None, max_length=128)
     customer_id: uuid.UUID
     invoice_date: date

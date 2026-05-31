@@ -127,3 +127,23 @@ def update_user_scope(
     db.commit()
     db.refresh(user)
     return UserResponse.model_validate(user)
+
+
+@router.delete("/{user_id}")
+def delete_user(
+    user_id: uuid.UUID,
+    db: DbSession,
+    current_user: AdminUser,
+) -> dict[str, str]:
+    user = db.execute(select(User).where(User.user_id == user_id)).scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    if user.user_id == current_user.user_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot delete current user")
+    if user.role == UserRole.OWNER:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot delete owner user")
+
+    db.delete(user)
+    db.commit()
+    return {"message": "User deleted"}

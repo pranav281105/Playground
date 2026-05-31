@@ -324,6 +324,63 @@ export function AdminPage() {
     }
   };
 
+  const deleteBusiness = async (business: Business) => {
+    const confirmed = window.confirm(`Delete business "${business.business_name}"?`);
+    if (!confirmed) {
+      return;
+    }
+    setError(null);
+    setSuccess(null);
+    setSaving(true);
+    try {
+      await api.delete(`/businesses/${business.business_id}`);
+      await loadAdminData();
+      setSuccess("Business deleted.");
+    } catch (requestError: unknown) {
+      setError(getApiErrorMessage(requestError, "Failed to delete business"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const deleteBranch = async (branch: Branch) => {
+    const confirmed = window.confirm(`Delete branch "${branch.branch_name}"?`);
+    if (!confirmed) {
+      return;
+    }
+    setError(null);
+    setSuccess(null);
+    setSaving(true);
+    try {
+      await api.delete(`/branches/${branch.branch_id}`);
+      await loadAdminData();
+      setSuccess("Branch deleted.");
+    } catch (requestError: unknown) {
+      setError(getApiErrorMessage(requestError, "Failed to delete branch"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const deleteUser = async (user: AuthUser) => {
+    const confirmed = window.confirm(`Delete user "${user.name}" (${user.email})?`);
+    if (!confirmed) {
+      return;
+    }
+    setError(null);
+    setSuccess(null);
+    setSaving(true);
+    try {
+      await api.delete(`/users/${user.user_id}`);
+      await loadAdminData();
+      setSuccess("User deleted.");
+    } catch (requestError: unknown) {
+      setError(getApiErrorMessage(requestError, "Failed to delete user"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div className="stack">
       {error ? <div className="sheet error">{error}</div> : null}
@@ -487,6 +544,7 @@ export function AdminPage() {
               <th>Business ID</th>
               <th>Company ID</th>
               <th>Name</th>
+              <th>Action</th>
             </tr>
           </thead>
           <tbody>
@@ -495,6 +553,16 @@ export function AdminPage() {
                 <td><code>{business.business_id}</code></td>
                 <td><code>{business.company_id}</code></td>
                 <td>{business.business_name}</td>
+                <td>
+                  <button
+                    type="button"
+                    className="btn-row danger"
+                    onClick={() => void deleteBusiness(business)}
+                    disabled={saving}
+                  >
+                    Delete
+                  </button>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -510,6 +578,7 @@ export function AdminPage() {
               <th>Business ID</th>
               <th>Name</th>
               <th>Location</th>
+              <th>Action</th>
             </tr>
           </thead>
           <tbody>
@@ -519,6 +588,16 @@ export function AdminPage() {
                 <td><code>{branch.business_id ?? "-"}</code></td>
                 <td>{branch.branch_name}</td>
                 <td>{branch.location ?? "-"}</td>
+                <td>
+                  <button
+                    type="button"
+                    className="btn-row danger"
+                    onClick={() => void deleteBranch(branch)}
+                    disabled={saving}
+                  >
+                    Delete
+                  </button>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -536,6 +615,7 @@ export function AdminPage() {
               <th>Company</th>
               <th>Business</th>
               <th>Branch</th>
+              <th>Action</th>
             </tr>
           </thead>
           <tbody>
@@ -547,6 +627,16 @@ export function AdminPage() {
                 <td>{shortId(user.company_id)}</td>
                 <td>{shortId(user.business_id)}</td>
                 <td>{shortId(user.branch_id)}</td>
+                <td>
+                  <button
+                    type="button"
+                    className="btn-row danger"
+                    onClick={() => void deleteUser(user)}
+                    disabled={saving}
+                  >
+                    Delete
+                  </button>
+                </td>
               </tr>
             ))}
           </tbody>

@@ -119,7 +119,6 @@ class Invoice(Base):
 
 class Payment(Base):
     __tablename__ = "payments"
-    __table_args__ = (UniqueConstraint("invoice_id", name="uq_payments_invoice_id"),)
 
     payment_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     invoice_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("invoices.invoice_id"), nullable=False)

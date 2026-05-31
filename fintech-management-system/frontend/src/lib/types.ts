@@ -86,6 +86,20 @@ export type Payment = {
   reference_number: string | null;
 };
 
+export type ReceivableStatus = {
+  invoice_id: string;
+  invoice_number: string;
+  customer_name: string;
+  invoice_date: string;
+  due_date: string;
+  sales_amount: string;
+  paid_amount: string;
+  balance_amount: string;
+  payment_status: "Paid" | "Partial" | "Pending";
+  days_overdue: number;
+  aging_bucket: "Paid" | "0-30" | "31-60" | "61-90" | "90+";
+};
+
 export type VendorPayment = {
   vendor_payment_id: string;
   vendor_id: string;

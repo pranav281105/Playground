@@ -188,6 +188,167 @@ def test_end_to_end_financial_workflow(client: TestClient) -> None:
     assert audit_forbidden.status_code == 403
 
 
+def test_partial_receivable_payments_and_aging(client: TestClient) -> None:
+    admin_token, _ = _register_and_login(
+        client,
+        {
+            "name": "Admin Partial",
+            "email": "admin.partial@example.com",
+            "password": "password123",
+            "role": "admin",
+            "branch_id": None,
+        },
+    )
+
+    branch_response = client.post(
+        "/api/v1/branches",
+        json={"branch_name": "Partial Branch", "location": "SG"},
+        headers=_auth_header(admin_token),
+    )
+    assert branch_response.status_code == 200
+    branch_id = branch_response.json()["branch_id"]
+
+    manager_token, _ = _register_and_login(
+        client,
+        {
+            "name": "Partial Manager",
+            "email": "manager.partial@example.com",
+            "password": "password123",
+            "role": "branch_manager",
+            "branch_id": branch_id,
+        },
+    )
+
+    customer_response = client.post(
+        "/api/v1/customers",
+        json={"customer_name": "Partial Buyer", "payment_terms": "Net 15"},
+        headers=_auth_header(manager_token),
+    )
+    assert customer_response.status_code == 200
+    customer_id = customer_response.json()["customer_id"]
+
+    invoice_response = client.post(
+        "/api/v1/invoices",
+        json={
+            "invoice_number": "INV-PARTIAL-001",
+            "customer_id": customer_id,
+            "invoice_date": date.today().isoformat(),
+            "sales_amount": "1000.00",
+            "gross_profit": "300.00",
+        },
+        headers=_auth_header(manager_token),
+    )
+    assert invoice_response.status_code == 200
+    invoice_id = invoice_response.json()["invoice_id"]
+
+    finalize_response = client.post(
+        f"/api/v1/invoices/{invoice_id}/finalize",
+        json={"reason": "Ready"},
+        headers=_auth_header(manager_token),
+    )
+    assert finalize_response.status_code == 200
+
+    first_payment = client.post(
+        "/api/v1/payments",
+        json={
+            "invoice_id": invoice_id,
+            "payment_date": date.today().isoformat(),
+            "payment_method": "cash",
+            "amount": "400.00",
+        },
+        headers=_auth_header(manager_token),
+    )
+    assert first_payment.status_code == 200
+
+    exceed_payment = client.post(
+        "/api/v1/payments",
+        json={
+            "invoice_id": invoice_id,
+            "payment_date": date.today().isoformat(),
+            "payment_method": "cash",
+            "amount": "700.00",
+        },
+        headers=_auth_header(manager_token),
+    )
+    assert exceed_payment.status_code == 400
+    assert "outstanding balance" in exceed_payment.json()["detail"]
+
+    second_payment = client.post(
+        "/api/v1/payments",
+        json={
+            "invoice_id": invoice_id,
+            "payment_date": date.today().isoformat(),
+            "payment_method": "bank_transfer",
+            "amount": "600.00",
+        },
+        headers=_auth_header(manager_token),
+    )
+    assert second_payment.status_code == 200
+
+    receivables_response = client.get("/api/v1/payments/receivables", headers=_auth_header(manager_token))
+    assert receivables_response.status_code == 200
+    receivables = receivables_response.json()
+    assert len(receivables) == 1
+    assert receivables[0]["invoice_id"] == invoice_id
+    assert receivables[0]["payment_status"] == "Paid"
+    assert receivables[0]["paid_amount"] == "1000.00"
+    assert receivables[0]["balance_amount"] == "0.00"
+
+
+def test_invoice_number_auto_generated_when_blank(client: TestClient) -> None:
+    admin_token, _ = _register_and_login(
+        client,
+        {
+            "name": "Admin Auto Number",
+            "email": "admin.autonumber@example.com",
+            "password": "password123",
+            "role": "admin",
+            "branch_id": None,
+        },
+    )
+
+    branch_response = client.post(
+        "/api/v1/branches",
+        json={"branch_name": "Auto Number Branch", "location": "SG"},
+        headers=_auth_header(admin_token),
+    )
+    assert branch_response.status_code == 200
+    branch_id = branch_response.json()["branch_id"]
+
+    manager_token, _ = _register_and_login(
+        client,
+        {
+            "name": "Auto Number Manager",
+            "email": "manager.autonumber@example.com",
+            "password": "password123",
+            "role": "branch_manager",
+            "branch_id": branch_id,
+        },
+    )
+
+    customer_response = client.post(
+        "/api/v1/customers",
+        json={"customer_name": "Auto Number Customer"},
+        headers=_auth_header(manager_token),
+    )
+    assert customer_response.status_code == 200
+    customer_id = customer_response.json()["customer_id"]
+
+    invoice_response = client.post(
+        "/api/v1/invoices",
+        json={
+            "customer_id": customer_id,
+            "invoice_date": date.today().isoformat(),
+            "sales_amount": "1500.00",
+            "gross_profit": "450.00",
+        },
+        headers=_auth_header(manager_token),
+    )
+    assert invoice_response.status_code == 200
+    invoice_number = invoice_response.json()["invoice_number"]
+    assert invoice_number.startswith(f"INV-{date.today().year}-")
+
+
 def test_report_exports_return_csv(client: TestClient) -> None:
     admin_token, _ = _register_and_login(
         client,
@@ -318,3 +479,98 @@ def test_admin_user_scope_assignment_api(client: TestClient) -> None:
     assert update_scope_response.json()["branch_id"] == branch_two_id
     assert update_scope_response.json()["business_id"] == business_id
     assert update_scope_response.json()["company_id"] == company_id
+
+
+def test_admin_can_delete_business_branch_and_user(client: TestClient) -> None:
+    admin_token, _ = _register_and_login(
+        client,
+        {
+            "name": "Admin Delete",
+            "email": "admin.delete@example.com",
+            "password": "password123",
+            "role": "admin",
+            "branch_id": None,
+            "business_id": None,
+            "company_id": None,
+        },
+    )
+
+    company_response = client.post(
+        "/api/v1/companies",
+        json={"company_name": "Delete Co"},
+        headers=_auth_header(admin_token),
+    )
+    assert company_response.status_code == 200
+    company_id = company_response.json()["company_id"]
+
+    business_response = client.post(
+        "/api/v1/businesses",
+        json={"company_id": company_id, "business_name": "Delete Biz"},
+        headers=_auth_header(admin_token),
+    )
+    assert business_response.status_code == 200
+    business_id = business_response.json()["business_id"]
+
+    branch_response = client.post(
+        "/api/v1/branches",
+        json={"business_id": business_id, "branch_name": "Delete Branch", "location": "SG"},
+        headers=_auth_header(admin_token),
+    )
+    assert branch_response.status_code == 200
+    branch_id = branch_response.json()["branch_id"]
+
+    _, manager_user = _register_and_login(
+        client,
+        {
+            "name": "Delete Manager",
+            "email": "delete.manager@example.com",
+            "password": "password123",
+            "role": "branch_manager",
+            "branch_id": branch_id,
+            "business_id": None,
+            "company_id": None,
+        },
+    )
+
+    manager_token, no_access_manager_user = _register_and_login(
+        client,
+        {
+            "name": "No Access Manager",
+            "email": "no.access.manager@example.com",
+            "password": "password123",
+            "role": "branch_manager",
+            "branch_id": branch_id,
+            "business_id": None,
+            "company_id": None,
+        },
+    )
+
+    forbidden_delete = client.delete(
+        f"/api/v1/users/{manager_user['user_id']}",
+        headers=_auth_header(manager_token),
+    )
+    assert forbidden_delete.status_code == 403
+
+    delete_user_response = client.delete(
+        f"/api/v1/users/{manager_user['user_id']}",
+        headers=_auth_header(admin_token),
+    )
+    assert delete_user_response.status_code == 200
+
+    delete_second_user_response = client.delete(
+        f"/api/v1/users/{no_access_manager_user['user_id']}",
+        headers=_auth_header(admin_token),
+    )
+    assert delete_second_user_response.status_code == 200
+
+    delete_branch_response = client.delete(
+        f"/api/v1/branches/{branch_id}",
+        headers=_auth_header(admin_token),
+    )
+    assert delete_branch_response.status_code == 200
+
+    delete_business_response = client.delete(
+        f"/api/v1/businesses/{business_id}",
+        headers=_auth_header(admin_token),
+    )
+    assert delete_business_response.status_code == 200

@@ -4,7 +4,7 @@ import { useAuth } from "../auth/AuthContext";
 import { api } from "../../lib/api";
 import { getApiErrorMessage } from "../../lib/apiError";
 import { formatCurrency, formatDate } from "../../lib/format";
-import type { Customer, Invoice, Payment, Vendor, VendorPayment } from "../../lib/types";
+import type { Payment, ReceivableStatus, Vendor, VendorPayment } from "../../lib/types";
 
 type PaymentMethod = Payment["payment_method"];
 
@@ -62,11 +62,9 @@ function paymentMethodLabel(value: PaymentMethod): string {
 export function PaymentsPage() {
   const { user } = useAuth();
 
-  const [payments, setPayments] = useState<Payment[]>([]);
+  const [receivables, setReceivables] = useState<ReceivableStatus[]>([]);
   const [vendorPayments, setVendorPayments] = useState<VendorPayment[]>([]);
-  const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [vendors, setVendors] = useState<Vendor[]>([]);
-  const [customers, setCustomers] = useState<Customer[]>([]);
 
   const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
 
@@ -89,18 +87,14 @@ export function PaymentsPage() {
 
   const loadData = () => {
     Promise.all([
-      api.get<Payment[]>("/payments"),
+      api.get<ReceivableStatus[]>("/payments/receivables"),
       api.get<VendorPayment[]>("/vendor-payments"),
-      api.get<Invoice[]>("/invoices"),
       api.get<Vendor[]>("/vendors"),
-      api.get<Customer[]>("/customers"),
     ])
-      .then(([paymentsResponse, vendorPaymentsResponse, invoicesResponse, vendorsResponse, customersResponse]) => {
-        setPayments(paymentsResponse.data);
+      .then(([receivablesResponse, vendorPaymentsResponse, vendorsResponse]) => {
+        setReceivables(receivablesResponse.data);
         setVendorPayments(vendorPaymentsResponse.data);
-        setInvoices(invoicesResponse.data);
         setVendors(vendorsResponse.data);
-        setCustomers(customersResponse.data);
       })
       .catch((requestError: unknown) => setError(getApiErrorMessage(requestError, "Failed to load payments")));
   };
@@ -109,30 +103,20 @@ export function PaymentsPage() {
     loadData();
   }, []);
 
-  const invoicesById = useMemo(
-    () => new Map(invoices.map((invoice) => [invoice.invoice_id, invoice])),
-    [invoices],
-  );
   const vendorsById = useMemo(
     () => new Map(vendors.map((vendor) => [vendor.vendor_id, vendor])),
     [vendors],
   );
-  const customersById = useMemo(
-    () => new Map(customers.map((customer) => [customer.customer_id, customer.customer_name])),
-    [customers],
-  );
-
-  const paidInvoiceIds = useMemo(() => new Set(payments.map((payment) => payment.invoice_id)), [payments]);
   const receivableInvoices = useMemo(
-    () => invoices.filter((invoice) => invoice.status === "FINALIZED" && !paidInvoiceIds.has(invoice.invoice_id)),
-    [invoices, paidInvoiceIds],
+    () => receivables.filter((item) => item.payment_status !== "Paid"),
+    [receivables],
   );
 
   const availableYears = useMemo(() => {
     const years: number[] = [];
 
-    for (const invoice of invoices) {
-      const parsed = extractYearMonth(invoice.invoice_date);
+    for (const receivable of receivables) {
+      const parsed = extractYearMonth(receivable.invoice_date);
       if (parsed) {
         years.push(parsed.year);
       }
@@ -146,7 +130,7 @@ export function PaymentsPage() {
     }
 
     return buildSelectableYears(years);
-  }, [invoices, vendorPayments]);
+  }, [receivables, vendorPayments]);
 
   useEffect(() => {
     const currentYear = new Date().getFullYear();
@@ -155,60 +139,30 @@ export function PaymentsPage() {
     }
   }, [availableYears, selectedYear]);
 
-  const filteredFinalizedInvoices = useMemo(
+  const receivedRows = useMemo(
     () =>
-      invoices.filter((invoice) => {
-        if (invoice.status !== "FINALIZED") {
-          return false;
-        }
-        const parsed = extractYearMonth(invoice.invoice_date);
-        return parsed?.year === selectedYear;
-      }),
-    [invoices, selectedYear],
+      receivables
+        .filter((item) => {
+          const parsed = extractYearMonth(item.invoice_date);
+          return parsed?.year === selectedYear;
+        })
+        .sort((left, right) => left.invoice_date.localeCompare(right.invoice_date)),
+    [receivables, selectedYear],
   );
-
-  const receivedRows = useMemo(() => {
-    return payments
-      .map((payment) => {
-        const invoice = invoicesById.get(payment.invoice_id);
-        if (!invoice) {
-          return null;
-        }
-        const parsed = extractYearMonth(invoice.invoice_date);
-        if (!parsed || parsed.year !== selectedYear) {
-          return null;
-        }
-        return {
-          payment,
-          invoice,
-          monthIndex: parsed.monthIndex,
-        };
-      })
-      .filter((row): row is { payment: Payment; invoice: Invoice; monthIndex: number } => Boolean(row))
-      .sort((left, right) => left.invoice.invoice_date.localeCompare(right.invoice.invoice_date));
-  }, [payments, invoicesById, selectedYear]);
 
   const receivedMonthlyRows = useMemo<ReceivedMonthlyRow[]>(() => {
     const buckets = MONTHS.map((month) => ({ month, invoiceAmount: 0, paid: 0, notPaid: 0 }));
-
-    for (const invoice of filteredFinalizedInvoices) {
-      const parsed = extractYearMonth(invoice.invoice_date);
+    for (const row of receivedRows) {
+      const parsed = extractYearMonth(row.invoice_date);
       if (!parsed) {
         continue;
       }
-      buckets[parsed.monthIndex].invoiceAmount += Number(invoice.sales_amount) || 0;
+      buckets[parsed.monthIndex].invoiceAmount += Number(row.sales_amount) || 0;
+      buckets[parsed.monthIndex].paid += Number(row.paid_amount) || 0;
+      buckets[parsed.monthIndex].notPaid += Number(row.balance_amount) || 0;
     }
-
-    for (const row of receivedRows) {
-      buckets[row.monthIndex].paid += Number(row.payment.amount) || 0;
-    }
-
-    for (const bucket of buckets) {
-      bucket.notPaid = Math.max(bucket.invoiceAmount - bucket.paid, 0);
-    }
-
     return buckets;
-  }, [filteredFinalizedInvoices, receivedRows]);
+  }, [receivedRows]);
 
   const receivedTotals = useMemo(
     () =>
@@ -222,6 +176,27 @@ export function PaymentsPage() {
       ),
     [receivedMonthlyRows],
   );
+
+  const agingBreakdown = useMemo(() => {
+    const totals = {
+      bucket0To30: 0,
+      bucket31To60: 0,
+      bucket61To90: 0,
+      bucket90Plus: 0,
+    };
+    for (const row of receivedRows) {
+      if (row.aging_bucket === "0-30") {
+        totals.bucket0To30 += Number(row.balance_amount) || 0;
+      } else if (row.aging_bucket === "31-60") {
+        totals.bucket31To60 += Number(row.balance_amount) || 0;
+      } else if (row.aging_bucket === "61-90") {
+        totals.bucket61To90 += Number(row.balance_amount) || 0;
+      } else if (row.aging_bucket === "90+") {
+        totals.bucket90Plus += Number(row.balance_amount) || 0;
+      }
+    }
+    return totals;
+  }, [receivedRows]);
 
   const filteredVendorPayments = useMemo(
     () =>
@@ -248,8 +223,8 @@ export function PaymentsPage() {
 
   const selectReceivableInvoice = (selectedInvoiceId: string) => {
     setInvoiceId(selectedInvoiceId);
-    const selectedInvoice = invoicesById.get(selectedInvoiceId);
-    setInvoiceAmount(selectedInvoice?.sales_amount ?? "");
+    const selectedInvoice = receivables.find((item) => item.invoice_id === selectedInvoiceId);
+    setInvoiceAmount(selectedInvoice?.balance_amount ?? "");
   };
 
   const submitReceivable = async (event: FormEvent<HTMLFormElement>) => {
@@ -355,11 +330,19 @@ export function PaymentsPage() {
                 <option value="">Select Finalized Invoice</option>
                 {receivableInvoices.map((invoice) => (
                   <option key={invoice.invoice_id} value={invoice.invoice_id}>
-                    {invoice.invoice_number}
+                    {`${invoice.invoice_number} • Due ${formatCurrency(invoice.balance_amount)}`}
                   </option>
                 ))}
               </select>
-              <input className="fi" style={{ width: "168px" }} placeholder="Invoice Amount (S$)" value={invoiceAmount} readOnly required />
+              <input
+                className="fi"
+                style={{ width: "168px" }}
+                placeholder="Payment Amount (S$)"
+                inputMode="decimal"
+                value={invoiceAmount}
+                onChange={(event) => setInvoiceAmount(event.target.value)}
+                required
+              />
               <select
                 className="fs"
                 style={{ width: "168px" }}
@@ -401,7 +384,9 @@ export function PaymentsPage() {
               </button>
             </form>
             <div className="form-hint" style={{ marginTop: "10px" }}>
-              {receivableInvoices.length === 0 ? "All finalized invoices are already paid." : `${receivableInvoices.length} finalized invoice(s) available.`}
+              {receivableInvoices.length === 0
+                ? "All finalized invoices are already paid."
+                : `${receivableInvoices.length} invoice(s) pending or partial.`}
             </div>
           </div>
         </div>
@@ -409,7 +394,7 @@ export function PaymentsPage() {
         <div className="tbl-row received">
           <div className="tbl-pane">
             <div className="pane-hd">
-              <div className="pane-title">Received Entries</div>
+              <div className="pane-title">Receivables Ledger</div>
               <div className="pane-meta">{receivedCountLabel}</div>
             </div>
             <div className="tscroll">
@@ -421,33 +406,39 @@ export function PaymentsPage() {
                     <th className="l">Invoice Date</th>
                     <th className="l">Customer</th>
                     <th>Invoice Amount (S$)</th>
-                    <th className="l">MOP</th>
-                    <th className="l">Payment Received Date</th>
+                    <th>Paid (S$)</th>
+                    <th>Balance (S$)</th>
+                    <th className="l">Due Date</th>
+                    <th className="l">Aging</th>
                     <th className="l">Status</th>
-                    <th className="l">Action</th>
                   </tr>
                 </thead>
                 <tbody>
                   {receivedRows.length === 0 ? (
                     <tr className="empty">
-                      <td className="l" colSpan={9}>
-                        No payments recorded yet.
+                      <td className="l" colSpan={10}>
+                        No receivable rows for selected year.
                       </td>
                     </tr>
                   ) : (
                     receivedRows.map((row, index) => (
-                      <tr key={row.payment.payment_id} className="on">
+                      <tr key={row.invoice_id} className="on">
                         <td className="l">{index + 1}</td>
-                        <td className="l mono">{row.invoice.invoice_number}</td>
-                        <td className="l">{formatDate(row.invoice.invoice_date)}</td>
-                        <td className="l hi">{customersById.get(row.invoice.customer_id) ?? "-"}</td>
-                        <td>{formatCurrency(row.invoice.sales_amount)}</td>
-                        <td className="l">{paymentMethodLabel(row.payment.payment_method)}</td>
-                        <td className="l">{formatDate(row.payment.payment_date)}</td>
-                        <td className="l">
-                          <span className="pill pill-green">Paid</span>
+                        <td className="l mono">{row.invoice_number}</td>
+                        <td className="l">{formatDate(row.invoice_date)}</td>
+                        <td className="l hi">{row.customer_name}</td>
+                        <td>{formatCurrency(row.sales_amount)}</td>
+                        <td className="pos">{Number(row.paid_amount) > 0 ? formatCurrency(row.paid_amount) : "-"}</td>
+                        <td className={Number(row.balance_amount) > 0 ? "neg" : undefined}>
+                          {Number(row.balance_amount) > 0 ? formatCurrency(row.balance_amount) : "-"}
                         </td>
-                        <td className="l">-</td>
+                        <td className="l">{formatDate(row.due_date)}</td>
+                        <td className="l">{row.aging_bucket}</td>
+                        <td className="l">
+                          <span className={row.payment_status === "Paid" ? "pill pill-green" : "pill pill-gray"}>
+                            {row.payment_status}
+                          </span>
+                        </td>
                       </tr>
                     ))
                   )}
@@ -458,9 +449,12 @@ export function PaymentsPage() {
 
           <div className="tbl-pane">
             <div className="pane-hd">
-              <div className="pane-title">Payments by Month</div>
+              <div className="pane-title">Aging and Month Summary</div>
             </div>
             <div className="tscroll">
+              <div className="form-hint" style={{ marginBottom: "8px" }}>
+                {`Aging Balance: 0-30 ${formatCurrency(agingBreakdown.bucket0To30)} · 31-60 ${formatCurrency(agingBreakdown.bucket31To60)} · 61-90 ${formatCurrency(agingBreakdown.bucket61To90)} · 90+ ${formatCurrency(agingBreakdown.bucket90Plus)}`}
+              </div>
               <table>
                 <thead>
                   <tr>

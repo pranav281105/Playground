@@ -13,6 +13,8 @@ type ImportSummary = {
   errors: string[];
 };
 
+type InvoiceSortField = "date" | "sales" | "gross_profit" | "margin";
+
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 const COLUMN_ALIASES = {
@@ -173,6 +175,16 @@ export function InvoicesPage() {
   const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
   const [importFileName, setImportFileName] = useState("No file chosen");
   const [actionInvoiceId, setActionInvoiceId] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [customerFilterId, setCustomerFilterId] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [minSalesAmount, setMinSalesAmount] = useState("");
+  const [maxSalesAmount, setMaxSalesAmount] = useState("");
+  const [minMargin, setMinMargin] = useState("");
+  const [maxMargin, setMaxMargin] = useState("");
+  const [sortField, setSortField] = useState<InvoiceSortField>("date");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -215,7 +227,7 @@ export function InvoicesPage() {
     }
   }, [availableYears, selectedYear]);
 
-  const filteredInvoices = useMemo(
+  const yearInvoices = useMemo(
     () =>
       invoices.filter((invoice) => {
         const parsed = extractYearMonth(invoice.invoice_date);
@@ -223,6 +235,84 @@ export function InvoicesPage() {
       }),
     [invoices, selectedYear],
   );
+
+  const filteredInvoices = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    const minSales = minSalesAmount ? Number(minSalesAmount) : null;
+    const maxSales = maxSalesAmount ? Number(maxSalesAmount) : null;
+    const minMarginValue = minMargin ? Number(minMargin) : null;
+    const maxMarginValue = maxMargin ? Number(maxMargin) : null;
+
+    return yearInvoices.filter((invoice) => {
+      if (customerFilterId && invoice.customer_id !== customerFilterId) {
+        return false;
+      }
+      if (dateFrom && invoice.invoice_date < dateFrom) {
+        return false;
+      }
+      if (dateTo && invoice.invoice_date > dateTo) {
+        return false;
+      }
+
+      const sales = Number(invoice.sales_amount);
+      if (minSales !== null && Number.isFinite(minSales) && sales < minSales) {
+        return false;
+      }
+      if (maxSales !== null && Number.isFinite(maxSales) && sales > maxSales) {
+        return false;
+      }
+
+      const gross = Number(invoice.gross_profit);
+      const margin = sales > 0 ? (gross / sales) * 100 : 0;
+      if (minMarginValue !== null && Number.isFinite(minMarginValue) && margin < minMarginValue) {
+        return false;
+      }
+      if (maxMarginValue !== null && Number.isFinite(maxMarginValue) && margin > maxMarginValue) {
+        return false;
+      }
+
+      if (!query) {
+        return true;
+      }
+      const customerName = customersById.get(invoice.customer_id) ?? "";
+      return [invoice.invoice_number, customerName].join(" ").toLowerCase().includes(query);
+    });
+  }, [
+    yearInvoices,
+    search,
+    customerFilterId,
+    dateFrom,
+    dateTo,
+    minSalesAmount,
+    maxSalesAmount,
+    minMargin,
+    maxMargin,
+    customersById,
+  ]);
+
+  const sortedInvoices = useMemo(() => {
+    return [...filteredInvoices].sort((left, right) => {
+      const leftSales = Number(left.sales_amount);
+      const rightSales = Number(right.sales_amount);
+      const leftGross = Number(left.gross_profit);
+      const rightGross = Number(right.gross_profit);
+      const leftMargin = leftSales > 0 ? (leftGross / leftSales) * 100 : 0;
+      const rightMargin = rightSales > 0 ? (rightGross / rightSales) * 100 : 0;
+
+      let comparison = 0;
+      if (sortField === "date") {
+        comparison = left.invoice_date.localeCompare(right.invoice_date);
+      } else if (sortField === "sales") {
+        comparison = leftSales - rightSales;
+      } else if (sortField === "gross_profit") {
+        comparison = leftGross - rightGross;
+      } else {
+        comparison = leftMargin - rightMargin;
+      }
+
+      return sortDirection === "asc" ? comparison : -comparison;
+    });
+  }, [filteredInvoices, sortField, sortDirection]);
 
   const monthlyProfitRows = useMemo(() => {
     const buckets = Array.from({ length: 12 }, (_, index) => ({
@@ -232,7 +322,7 @@ export function InvoicesPage() {
       cogs: 0,
     }));
 
-    for (const invoice of filteredInvoices) {
+    for (const invoice of yearInvoices) {
       const parsed = extractYearMonth(invoice.invoice_date);
       if (!parsed) {
         continue;
@@ -243,7 +333,7 @@ export function InvoicesPage() {
     }
 
     return buckets;
-  }, [filteredInvoices]);
+  }, [yearInvoices]);
 
   const monthlyTotals = useMemo(
     () =>
@@ -267,7 +357,7 @@ export function InvoicesPage() {
 
     try {
       await api.post("/invoices", {
-        invoice_number: invoiceNumber,
+        invoice_number: invoiceNumber || undefined,
         customer_id: customerId,
         invoice_date: invoiceDate,
         sales_amount: salesAmount,
@@ -346,7 +436,7 @@ export function InvoicesPage() {
         const grossProfitText = findValue(row, COLUMN_ALIASES.grossProfit);
         const remarksText = toText(findValue(row, COLUMN_ALIASES.remarks));
 
-        if (!invoiceNumberText || !customerNameText || invoiceDateText === undefined || salesAmountText === undefined || grossProfitText === undefined) {
+        if (!customerNameText || invoiceDateText === undefined || salesAmountText === undefined || grossProfitText === undefined) {
           rowErrors.push(`Row ${rowNo}: Missing required columns or values.`);
           continue;
         }
@@ -381,7 +471,7 @@ export function InvoicesPage() {
 
         try {
           await api.post("/invoices", {
-            invoice_number: invoiceNumberText,
+            invoice_number: invoiceNumberText || undefined,
             customer_id: customerMatches[0],
             invoice_date: parsedDate,
             sales_amount: parsedSalesAmount,
@@ -445,7 +535,7 @@ export function InvoicesPage() {
     }
   };
 
-  const invoiceCountLabel = `${filteredInvoices.length} invoice${filteredInvoices.length === 1 ? "" : "s"}`;
+  const invoiceCountLabel = `${sortedInvoices.length} invoice${sortedInvoices.length === 1 ? "" : "s"}`;
 
   return (
     <div className="stack">
@@ -465,10 +555,9 @@ export function InvoicesPage() {
           <form className="form-row invoice-form" onSubmit={onSubmit}>
             <input
               className="fi"
-              placeholder="Invoice No."
+              placeholder="Invoice No. (optional, auto-generated if blank)"
               value={invoiceNumber}
               onChange={(event) => setInvoiceNumber(event.target.value)}
-              required
             />
             <input
               className="fi"
@@ -529,7 +618,8 @@ export function InvoicesPage() {
         </div>
         <div className="card-body">
           <div className="import-desc">
-            Required columns: <b>Invoice No.</b>, <b>Invoice Date</b>, <b>Name of Customer</b>, <b>Sales Amount Excluding GST</b>, <b>Gross Profit</b>
+            Required columns: <b>Invoice Date</b>, <b>Name of Customer</b>, <b>Sales Amount Excluding GST</b>, <b>Gross Profit</b>.
+            Optional columns: <b>Invoice No.</b>, <b>Remarks</b>.
           </div>
           <div className="file-row">
             <label className="file-lbl" htmlFor="invoice-file-input">
@@ -585,6 +675,67 @@ export function InvoicesPage() {
               <div className="tbl-card-title">Invoice List</div>
               <div className="tbl-card-meta">{invoiceCountLabel}</div>
             </div>
+            <div className="toolbar">
+              <div className="search-wrap">
+                <input
+                  className="search-inp"
+                  placeholder="Search by invoice no or customer..."
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                />
+              </div>
+              <select value={customerFilterId} onChange={(event) => setCustomerFilterId(event.target.value)}>
+                <option value="">All customers</option>
+                {customers.map((customer) => (
+                  <option key={customer.customer_id} value={customer.customer_id}>
+                    {customer.customer_name}
+                  </option>
+                ))}
+              </select>
+              <input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} />
+              <input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} />
+              <input
+                type="number"
+                min="0"
+                placeholder="Min Sales"
+                value={minSalesAmount}
+                onChange={(event) => setMinSalesAmount(event.target.value)}
+              />
+              <input
+                type="number"
+                min="0"
+                placeholder="Max Sales"
+                value={maxSalesAmount}
+                onChange={(event) => setMaxSalesAmount(event.target.value)}
+              />
+              <input
+                type="number"
+                min="0"
+                placeholder="Min Margin %"
+                value={minMargin}
+                onChange={(event) => setMinMargin(event.target.value)}
+              />
+              <input
+                type="number"
+                min="0"
+                placeholder="Max Margin %"
+                value={maxMargin}
+                onChange={(event) => setMaxMargin(event.target.value)}
+              />
+              <select value={sortField} onChange={(event) => setSortField(event.target.value as InvoiceSortField)}>
+                <option value="date">Sort: Date</option>
+                <option value="sales">Sort: Sales</option>
+                <option value="gross_profit">Sort: Gross Profit</option>
+                <option value="margin">Sort: Margin</option>
+              </select>
+              <button
+                type="button"
+                className="filter-btn"
+                onClick={() => setSortDirection((value) => (value === "asc" ? "desc" : "asc"))}
+              >
+                {sortDirection === "asc" ? "Asc" : "Desc"}
+              </button>
+            </div>
             <div className="tbl-scroll">
               <table>
                 <thead>
@@ -601,14 +752,14 @@ export function InvoicesPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredInvoices.length === 0 ? (
+                  {sortedInvoices.length === 0 ? (
                     <tr className="empty">
                       <td className="l" colSpan={9}>
-                        No invoices for selected year.
+                        No invoices match selected filters.
                       </td>
                     </tr>
                   ) : (
-                    filteredInvoices.map((invoice, index) => (
+                    sortedInvoices.map((invoice, index) => (
                       <tr key={invoice.invoice_id} className="on">
                         <td className="l">{index + 1}</td>
                         <td className="l mono">{invoice.invoice_number}</td>

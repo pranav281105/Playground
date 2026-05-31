@@ -3,7 +3,7 @@ import uuid
 from fastapi import APIRouter, Query
 
 from app.api.deps import CurrentUser, DbSession
-from app.schemas.payment import PaymentCreate, PaymentResponse
+from app.schemas.payment import PaymentCreate, PaymentResponse, ReceivableStatusResponse
 from app.services.audit_service import AuditService
 from app.services.payment_service import PaymentService
 
@@ -33,3 +33,17 @@ def list_payments(
 ) -> list[PaymentResponse]:
     payments = PaymentService(db).list_payments(current_user, business_id=business_id, branch_id=branch_id)
     return [PaymentResponse.model_validate(payment) for payment in payments]
+
+
+@router.get("/receivables", response_model=list[ReceivableStatusResponse])
+def list_receivables(
+    db: DbSession,
+    current_user: CurrentUser,
+    business_id: uuid.UUID | None = Query(default=None),
+    branch_id: uuid.UUID | None = Query(default=None),
+) -> list[ReceivableStatusResponse]:
+    return PaymentService(db).list_receivables(
+        current_user,
+        business_id=business_id,
+        branch_id=branch_id,
+    )
