@@ -1,122 +1,126 @@
-import { FormEvent, useState } from "react";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { Eye, EyeOff, Lock, Mail } from "lucide-react";
+import { useState } from "react";
+import { useForm } from "react-hook-form";
 import { Navigate, useLocation } from "react-router-dom";
+import { z } from "zod";
 
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useAuth } from "./AuthContext";
+
+const schema = z.object({
+  email: z.string().email(),
+  password: z.string().min(8),
+});
+
+type FormValues = z.infer<typeof schema>;
 
 export function LoginPage() {
   const { token, login } = useAuth();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
   const location = useLocation();
 
   const from = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname ?? "/dashboard";
+
+  const form = useForm<FormValues>({
+    resolver: zodResolver(schema),
+    defaultValues: {
+      email: "",
+      password: "",
+    },
+  });
 
   if (token) {
     return <Navigate to={from} replace />;
   }
 
-  const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setSubmitting(true);
+  const onSubmit = form.handleSubmit(async (values) => {
     setError(null);
     try {
-      await login({ email, password });
+      await login(values);
     } catch {
       setError("Invalid credentials. Please try again.");
-    } finally {
-      setSubmitting(false);
     }
-  };
+  });
 
   return (
-    <main className="auth-shell">
-      <section className="auth-card signin-card">
-        <div className="signin-top">
-          <div className="logo-wrap">
-            <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" aria-hidden="true">
-              <path d="M2 6h8M6 2v8" />
-            </svg>
-          </div>
-          <h1 className="card-title">FinTech Management System</h1>
-          <p className="card-sub">Sign in to continue.</p>
-        </div>
+    <div className="flex min-h-screen items-center justify-center bg-background px-4 py-10">
+      <div className="w-full max-w-md">
+        <Card>
+          <CardHeader className="space-y-1">
+            <CardTitle className="text-2xl">FinTech Management System</CardTitle>
+            <CardDescription>Sign in to continue.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            {error ? (
+              <Alert variant="destructive">
+                <AlertTitle>Sign in failed</AlertTitle>
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            ) : null}
 
-        <form className="auth-form" onSubmit={onSubmit}>
-          {error ? (
-            <div className="err-msg" role="alert">
-              <span>{error}</span>
-            </div>
-          ) : null}
+            <form onSubmit={onSubmit} className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium" htmlFor="email">
+                  Email
+                </label>
+                <div className="relative">
+                  <Mail className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    id="email"
+                    type="email"
+                    autoComplete="email"
+                    placeholder="you@example.com"
+                    className="pl-9"
+                    {...form.register("email")}
+                  />
+                </div>
+                {form.formState.errors.email ? (
+                  <p className="text-sm text-destructive">{form.formState.errors.email.message}</p>
+                ) : null}
+              </div>
 
-          <div className="field">
-            <label className="field-label" htmlFor="email">Email</label>
-            <div className="field-wrap">
-              <span className="field-icon" aria-hidden="true">
-                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-                  <path d="M2 3.5h12v9H2z" />
-                  <path d="m3 4.5 5 4 5-4" />
-                </svg>
-              </span>
-              <input
-                className="fi"
-                id="email"
-                type="email"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-                autoComplete="email"
-                placeholder="you@example.com"
-                required
-              />
-            </div>
-          </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium" htmlFor="password">
+                  Password
+                </label>
+                <div className="relative">
+                  <Lock className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    id="password"
+                    type={showPassword ? "text" : "password"}
+                    autoComplete="current-password"
+                    placeholder="••••••••"
+                    className="pl-9 pr-10"
+                    {...form.register("password")}
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="absolute right-1 top-1 h-7 w-7"
+                    onClick={() => setShowPassword((value) => !value)}
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </Button>
+                </div>
+                {form.formState.errors.password ? (
+                  <p className="text-sm text-destructive">{form.formState.errors.password.message}</p>
+                ) : null}
+              </div>
 
-          <div className="field">
-            <label className="field-label" htmlFor="password">Password</label>
-            <div className="field-wrap">
-              <span className="field-icon" aria-hidden="true">
-                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-                  <rect x="3" y="7" width="10" height="7" rx="1.5" />
-                  <path d="M5.5 7V5.8a2.5 2.5 0 1 1 5 0V7" />
-                </svg>
-              </span>
-              <input
-                className="fi"
-                id="password"
-                type={showPassword ? "text" : "password"}
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                autoComplete="current-password"
-                placeholder="••••••••"
-                required
-              />
-              <button
-                className="pw-toggle"
-                type="button"
-                onClick={() => setShowPassword((value) => !value)}
-                aria-label={showPassword ? "Hide password" : "Show password"}
-              >
-                {showPassword ? "Hide" : "Show"}
-              </button>
-            </div>
-          </div>
-
-          <button className="btn-signin" type="submit" disabled={submitting}>
-            {submitting ? (
-              <>
-                <span className="spinner" aria-hidden="true" />
-                <span>Signing in...</span>
-              </>
-            ) : (
-              <span>Sign in</span>
-            )}
-          </button>
-        </form>
-
-        <div className="card-foot">Secure sign-in for authorized users only.</div>
-      </section>
-    </main>
+              <Button type="submit" className="w-full" disabled={form.formState.isSubmitting}>
+                {form.formState.isSubmitting ? "Signing in..." : "Sign in"}
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
   );
 }
