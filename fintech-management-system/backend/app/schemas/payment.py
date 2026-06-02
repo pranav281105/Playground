@@ -26,3 +26,17 @@ class PaymentResponse(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class ReceivableStatusResponse(BaseModel):
+    invoice_id: uuid.UUID
+    invoice_number: str
+    customer_name: str
+    invoice_date: date
+    due_date: date
+    sales_amount: Decimal
+    paid_amount: Decimal
+    balance_amount: Decimal
+    payment_status: str
+    days_overdue: int
+    aging_bucket: str

@@ -5,7 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.entities import FailureCost, FixedCost, Invoice, Payment, User, VariableCost, VendorPayment
-from app.models.enums import InvoiceStatus, UserRole
+from app.models.enums import InvoiceStatus
 from app.schemas.report import CashFlowReport, IncomeStatementReport, RevenueSummaryItem
 from app.services.financial_engine import (
     calculate_closing_balance,
@@ -13,6 +13,7 @@ from app.services.financial_engine import (
     calculate_net_income,
     quantize_money,
 )
+from app.services.scope_service import apply_branch_scope
 
 
 class ReportingService:
@@ -20,24 +21,32 @@ class ReportingService:
         self.db = db
 
     def income_statement(self, current_user: User) -> IncomeStatementReport:
-        invoice_filters = [Invoice.status == InvoiceStatus.FINALIZED]
-        if current_user.role != UserRole.ADMIN:
-            invoice_filters.append(Invoice.branch_id == current_user.branch_id)
-
         total_revenue = self.db.execute(
-            select(func.coalesce(func.sum(Invoice.sales_amount), 0)).where(*invoice_filters)
+            apply_branch_scope(
+                select(func.coalesce(func.sum(Invoice.sales_amount), 0)).where(Invoice.status == InvoiceStatus.FINALIZED),
+                current_user,
+                Invoice.branch_id,
+            )
         ).scalar_one()
         total_gp = self.db.execute(
-            select(func.coalesce(func.sum(Invoice.gross_profit), 0)).where(*invoice_filters)
+            apply_branch_scope(
+                select(func.coalesce(func.sum(Invoice.gross_profit), 0)).where(Invoice.status == InvoiceStatus.FINALIZED),
+                current_user,
+                Invoice.branch_id,
+            )
         ).scalar_one()
 
-        fixed_query = select(func.coalesce(func.sum(FixedCost.amount), 0))
-        variable_query = select(func.coalesce(func.sum(VariableCost.amount), 0))
-        failure_query = select(func.coalesce(func.sum(FailureCost.amount), 0))
-        if current_user.role != UserRole.ADMIN:
-            fixed_query = fixed_query.where(FixedCost.branch_id == current_user.branch_id)
-            variable_query = variable_query.where(VariableCost.branch_id == current_user.branch_id)
-            failure_query = failure_query.where(FailureCost.branch_id == current_user.branch_id)
+        fixed_query = apply_branch_scope(select(func.coalesce(func.sum(FixedCost.amount), 0)), current_user, FixedCost.branch_id)
+        variable_query = apply_branch_scope(
+            select(func.coalesce(func.sum(VariableCost.amount), 0)),
+            current_user,
+            VariableCost.branch_id,
+        )
+        failure_query = apply_branch_scope(
+            select(func.coalesce(func.sum(FailureCost.amount), 0)),
+            current_user,
+            FailureCost.branch_id,
+        )
 
         fixed_costs = self.db.execute(fixed_query).scalar_one()
         variable_costs = self.db.execute(variable_query).scalar_one()
@@ -65,10 +74,6 @@ class ReportingService:
         if months > 24:
             months = 24
 
-        filters = [Invoice.status == InvoiceStatus.FINALIZED, Invoice.invoice_date >= self._months_ago(months - 1)]
-        if current_user.role != UserRole.ADMIN:
-            filters.append(Invoice.branch_id == current_user.branch_id)
-
         query = (
             select(
                 func.extract("year", Invoice.invoice_date).label("year"),
@@ -76,13 +81,14 @@ class ReportingService:
                 func.coalesce(func.sum(Invoice.sales_amount), 0).label("total_revenue"),
                 func.coalesce(func.sum(Invoice.gross_profit), 0).label("total_gross_profit"),
             )
-            .where(*filters)
+            .where(Invoice.status == InvoiceStatus.FINALIZED, Invoice.invoice_date >= self._months_ago(months - 1))
             .group_by(func.extract("year", Invoice.invoice_date), func.extract("month", Invoice.invoice_date))
             .order_by(
                 func.extract("year", Invoice.invoice_date).asc(),
                 func.extract("month", Invoice.invoice_date).asc(),
             )
         )
+        query = apply_branch_scope(query, current_user, Invoice.branch_id)
 
         rows = self.db.execute(query).all()
         summary: list[RevenueSummaryItem] = []
@@ -110,12 +116,11 @@ class ReportingService:
         failure_query = select(func.coalesce(func.sum(FailureCost.amount), 0))
         vendor_payment_query = select(func.coalesce(func.sum(VendorPayment.amount), 0))
 
-        if current_user.role != UserRole.ADMIN:
-            payment_query = payment_query.where(Invoice.branch_id == current_user.branch_id)
-            fixed_query = fixed_query.where(FixedCost.branch_id == current_user.branch_id)
-            variable_query = variable_query.where(VariableCost.branch_id == current_user.branch_id)
-            failure_query = failure_query.where(FailureCost.branch_id == current_user.branch_id)
-            vendor_payment_query = vendor_payment_query.where(VendorPayment.branch_id == current_user.branch_id)
+        payment_query = apply_branch_scope(payment_query, current_user, Invoice.branch_id)
+        fixed_query = apply_branch_scope(fixed_query, current_user, FixedCost.branch_id)
+        variable_query = apply_branch_scope(variable_query, current_user, VariableCost.branch_id)
+        failure_query = apply_branch_scope(failure_query, current_user, FailureCost.branch_id)
+        vendor_payment_query = apply_branch_scope(vendor_payment_query, current_user, VendorPayment.branch_id)
 
         cash_received = Decimal(str(self.db.execute(payment_query).scalar_one()))
         fixed_costs = Decimal(str(self.db.execute(fixed_query).scalar_one()))

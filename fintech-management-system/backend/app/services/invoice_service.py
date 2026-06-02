@@ -1,4 +1,5 @@
 import uuid
+from datetime import date
 from decimal import Decimal
 
 from fastapi import HTTPException, status
@@ -6,10 +7,11 @@ from sqlalchemy import Select, select
 from sqlalchemy.orm import Session
 
 from app.models.entities import Customer, Invoice, User
-from app.models.enums import InvoiceStatus, UserRole
+from app.models.enums import InvoiceStatus, UserRole, is_owner_role
 from app.schemas.invoice import InvoiceCreate, InvoiceUpdateDraft
 from app.services.access_control import ensure_branch_access
 from app.services.financial_engine import quantize_money
+from app.services.scope_service import apply_branch_scope, branch_scope_predicate
 
 
 def validate_lifecycle_transition(
@@ -26,7 +28,7 @@ def validate_lifecycle_transition(
         return
 
     if target_status == InvoiceStatus.VOID:
-        if user_role != UserRole.ADMIN:
+        if not is_owner_role(user_role):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only admin can void invoices")
         if current_status != InvoiceStatus.FINALIZED:
             raise HTTPException(
@@ -42,11 +44,22 @@ class InvoiceService:
     def __init__(self, db: Session):
         self.db = db
 
+    def _generate_invoice_number(self, invoice_date: date) -> str:
+        prefix = f"INV-{invoice_date.year}-"
+        existing_numbers = self.db.execute(
+            select(Invoice.invoice_number).where(Invoice.invoice_number.like(f"{prefix}%"))
+        ).scalars()
+
+        next_sequence = 1
+        for value in existing_numbers:
+            suffix = value[len(prefix) :]
+            if suffix.isdigit():
+                next_sequence = max(next_sequence, int(suffix) + 1)
+        return f"{prefix}{next_sequence:03d}"
+
     def _invoice_query_for_user(self, current_user: User) -> Select[tuple[Invoice]]:
         query: Select[tuple[Invoice]] = select(Invoice)
-        if current_user.role == UserRole.ADMIN:
-            return query
-        return query.where(Invoice.branch_id == current_user.branch_id)
+        return apply_branch_scope(query, current_user, Invoice.branch_id)
 
     def list_invoices(self, current_user: User) -> list[Invoice]:
         query = self._invoice_query_for_user(current_user).order_by(Invoice.created_at.desc())
@@ -61,20 +74,11 @@ class InvoiceService:
         return invoice
 
     def create_invoice(self, payload: InvoiceCreate, current_user: User) -> Invoice:
-        branch_id = current_user.branch_id
-        if current_user.role == UserRole.ADMIN:
-            customer = self.db.execute(
-                select(Customer).where(Customer.customer_id == payload.customer_id)
-            ).scalar_one_or_none()
-        else:
-            if branch_id is None:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing user branch")
-            customer = self.db.execute(
-                select(Customer).where(
-                    Customer.customer_id == payload.customer_id,
-                    Customer.branch_id == branch_id,
-                )
-            ).scalar_one_or_none()
+        customer_query = select(Customer).where(Customer.customer_id == payload.customer_id)
+        customer_branch_scope = branch_scope_predicate(current_user, Customer.branch_id)
+        if customer_branch_scope is not None:
+            customer_query = customer_query.where(customer_branch_scope)
+        customer = self.db.execute(customer_query).scalar_one_or_none()
 
         if not customer:
             raise HTTPException(
@@ -85,14 +89,16 @@ class InvoiceService:
         selected_branch_id = customer.branch_id
         ensure_branch_access(current_user, selected_branch_id)
 
-        existing = self.db.execute(
-            select(Invoice).where(Invoice.invoice_number == payload.invoice_number)
-        ).scalar_one_or_none()
+        invoice_number = payload.invoice_number.strip() if payload.invoice_number else ""
+        if not invoice_number:
+            invoice_number = self._generate_invoice_number(payload.invoice_date)
+
+        existing = self.db.execute(select(Invoice).where(Invoice.invoice_number == invoice_number)).scalar_one_or_none()
         if existing:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Invoice number already exists")
 
         invoice = Invoice(
-            invoice_number=payload.invoice_number,
+            invoice_number=invoice_number,
             lazada_order_id=payload.lazada_order_id,
             branch_id=selected_branch_id,
             customer_id=payload.customer_id,

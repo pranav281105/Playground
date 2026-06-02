@@ -9,7 +9,7 @@ export function ProtectedRoute() {
   if (initializing) {
     return (
       <main className="container">
-        <div className="card">Loading session...</div>
+        <div className="sheet outline">Loading session...</div>
       </main>
     );
   }

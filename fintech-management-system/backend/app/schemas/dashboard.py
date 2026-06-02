@@ -21,3 +21,13 @@ class RevenueTrendPoint(BaseModel):
 class CostBreakdownPoint(BaseModel):
     category: str
     amount: Decimal
+
+
+class BusinessPerformancePoint(BaseModel):
+    business_id: str
+    business_name: str
+    revenue: Decimal
+    gross_profit: Decimal
+    total_costs: Decimal
+    net_income: Decimal
+    gross_profit_margin: Decimal

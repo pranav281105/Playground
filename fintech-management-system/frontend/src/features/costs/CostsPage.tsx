@@ -265,247 +265,408 @@ export function CostsPage() {
     }
   };
 
+  const failureTotal = useMemo(
+    () => filteredFailure.reduce((accumulator, item) => accumulator + (Number(item.amount) || 0), 0),
+    [filteredFailure],
+  );
+
   return (
     <div className="stack">
-      <section className="card">
-        <div className="cost-page-header">
-          <h3>Costs</h3>
-          <div className="cost-page-controls">
-            <label htmlFor="cost-year">Year</label>
-            <select id="cost-year" value={selectedYear} onChange={(event) => setSelectedYear(Number(event.target.value))}>
-              {availableYears.map((year) => (
-                <option key={year} value={year}>
-                  {year}
-                </option>
-              ))}
-            </select>
-          </div>
+      <div className="pg-head">
+        <div>
+          <div className="pg-title">Costs</div>
+          <div className="pg-meta">{`Branch ID: ${user?.branch_id ?? "Unassigned"} · Phase 1 financial operations console.`}</div>
         </div>
-        {error ? <p className="error">{error}</p> : null}
-        {success ? <p>{success}</p> : null}
-      </section>
-
-      <section className="card cost-sheet fixed">
-        <h3>{`Fixed Costs - Year ${selectedYear}`}</h3>
-        <p className="cost-sheet-subtitle">(Rent, Insurance, Fees, Licenses, Utilities, etc.)</p>
-        {canCreateCostEntry ? (
-          <form className="inline-form" onSubmit={submitFixed}>
-            <input type="date" value={fixedDate} onChange={(event) => setFixedDate(event.target.value)} required />
-            <select value={fixedCategory} onChange={(event) => setFixedCategory(event.target.value)}>
-              {FIXED_COST_OPTIONS.map((item) => (
-                <option key={item} value={item}>
-                  {item}
-                </option>
-              ))}
-              <option value={OTHER_OPTION}>Other...</option>
-            </select>
-            {fixedCategory === OTHER_OPTION ? (
-              <input
-                placeholder="Custom Description"
-                value={fixedCustomDescription}
-                onChange={(event) => setFixedCustomDescription(event.target.value)}
-                required
-              />
-            ) : null}
-            <input
-              placeholder="Amount (S$)"
-              inputMode="decimal"
-              value={fixedAmount}
-              onChange={(event) => setFixedAmount(event.target.value)}
-              required
-            />
-            <input placeholder="Remarks" value={fixedRemarks} onChange={(event) => setFixedRemarks(event.target.value)} />
-            <button type="submit">Add Fixed Cost</button>
-          </form>
-        ) : (
-          <p>Cost entry creation is disabled for users without a branch assignment.</p>
-        )}
-
-        <div className="cost-sheet-layout">
-          <div className="table-scroll">
-            <table className="data-table cost-ledger-table">
-              <thead>
-                <tr>
-                  <th>S.No</th>
-                  <th>Invoice Date</th>
-                  <th>Description</th>
-                  <th>Amount (S$)</th>
-                  <th>Remarks</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredFixed.map((item, index) => (
-                  <tr key={item.fixed_cost_id}>
-                    <td>{index + 1}</td>
-                    <td>{formatDate(item.date)}</td>
-                    <td>{item.category}</td>
-                    <td className="align-right">{formatCurrency(item.amount)}</td>
-                    <td>{item.description ?? "-"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div className="table-scroll">
-            <h4>Expenses by Month</h4>
-            <table className="data-table cost-monthly-table">
-              <thead>
-                <tr>
-                  <th>Month</th>
-                  <th>Expenses in S$</th>
-                </tr>
-              </thead>
-              <tbody>
-                {MONTHS.map((month, index) => (
-                  <tr key={month}>
-                    <td>{month}</td>
-                    <td className="align-right">{formatCurrency(fixedMonthlyTotals[index] ?? 0)}</td>
-                  </tr>
-                ))}
-                <tr className="total-row">
-                  <td>Total</td>
-                  <td className="align-right">{formatCurrency(sum(fixedMonthlyTotals))}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </section>
-
-      <section className="card cost-sheet variable">
-        <h3>{`Variable Costs - Year ${selectedYear}`}</h3>
-        <p className="cost-sheet-subtitle">(Payroll, Shipping, Equipment, Marketing, Other expenses, etc.)</p>
-        {canCreateCostEntry ? (
-          <form className="inline-form" onSubmit={submitVariable}>
-            <input type="date" value={variableDate} onChange={(event) => setVariableDate(event.target.value)} required />
-            <select value={variableCategory} onChange={(event) => setVariableCategory(event.target.value)}>
-              {VARIABLE_COST_OPTIONS.map((item) => (
-                <option key={item} value={item}>
-                  {item}
-                </option>
-              ))}
-              <option value={OTHER_OPTION}>Other...</option>
-            </select>
-            {variableCategory === OTHER_OPTION ? (
-              <input
-                placeholder="Custom Description"
-                value={variableCustomDescription}
-                onChange={(event) => setVariableCustomDescription(event.target.value)}
-                required
-              />
-            ) : null}
-            <input
-              placeholder="Amount (S$)"
-              inputMode="decimal"
-              value={variableAmount}
-              onChange={(event) => setVariableAmount(event.target.value)}
-              required
-            />
-            <input placeholder="Remarks" value={variableRemarks} onChange={(event) => setVariableRemarks(event.target.value)} />
-            <button type="submit">Add Variable Cost</button>
-          </form>
-        ) : (
-          <p>Cost entry creation is disabled for users without a branch assignment.</p>
-        )}
-
-        <div className="cost-sheet-layout">
-          <div className="table-scroll">
-            <table className="data-table cost-ledger-table">
-              <thead>
-                <tr>
-                  <th>S.No</th>
-                  <th>Invoice Date</th>
-                  <th>Description</th>
-                  <th>Amount (S$)</th>
-                  <th>Remarks</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredVariable.map((item, index) => (
-                  <tr key={item.variable_cost_id}>
-                    <td>{index + 1}</td>
-                    <td>{formatDate(item.date)}</td>
-                    <td>{item.category}</td>
-                    <td className="align-right">{formatCurrency(item.amount)}</td>
-                    <td>{item.description ?? "-"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div className="table-scroll">
-            <h4>Expenses by Month</h4>
-            <table className="data-table cost-monthly-table">
-              <thead>
-                <tr>
-                  <th>Month</th>
-                  <th>Expenses in S$</th>
-                </tr>
-              </thead>
-              <tbody>
-                {MONTHS.map((month, index) => (
-                  <tr key={month}>
-                    <td>{month}</td>
-                    <td className="align-right">{formatCurrency(variableMonthlyTotals[index] ?? 0)}</td>
-                  </tr>
-                ))}
-                <tr className="total-row">
-                  <td>Total</td>
-                  <td className="align-right">{formatCurrency(sum(variableMonthlyTotals))}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </section>
-
-      <section className="card">
-        <h3>{`Failure Costs - Year ${selectedYear}`}</h3>
-        {canCreateCostEntry ? (
-          <form className="inline-form" onSubmit={submitFailure}>
-            <select value={failureType} onChange={(event) => setFailureType(event.target.value as FailureType)}>
-              {FAILURE_TYPE_OPTIONS.map((item) => (
-                <option key={item.value} value={item.value}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
-            <input type="date" value={failureDate} onChange={(event) => setFailureDate(event.target.value)} required />
-            <input
-              placeholder="Amount (S$)"
-              inputMode="decimal"
-              value={failureAmount}
-              onChange={(event) => setFailureAmount(event.target.value)}
-              required
-            />
-            <input
-              placeholder="Root Cause"
-              value={failureRootCause}
-              onChange={(event) => setFailureRootCause(event.target.value)}
-            />
-            <button type="submit">Add Failure Cost</button>
-          </form>
-        ) : null}
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>Failure Type</th>
-              <th>Amount</th>
-              <th>Root Cause</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredFailure.map((item) => (
-              <tr key={item.failure_cost_id}>
-                <td>{formatDate(item.date)}</td>
-                <td>{item.failure_type}</td>
-                <td className="align-right">{formatCurrency(item.amount)}</td>
-                <td>{item.root_cause ?? "-"}</td>
-              </tr>
+        <div className="yr-ctrl">
+          <span className="yr-lbl">Year</span>
+          <select className="yr-sel" id="cost-year" value={selectedYear} onChange={(event) => setSelectedYear(Number(event.target.value))}>
+            {availableYears.map((year) => (
+              <option key={year} value={year}>
+                {year}
+              </option>
             ))}
-          </tbody>
-        </table>
+          </select>
+        </div>
+      </div>
+
+      {error ? <div className="fmsg err show">{error}</div> : null}
+      {success ? <div className="fmsg ok show">{success}</div> : null}
+
+      <section className="cost-section">
+        <div className="section-label">
+          <div className="section-title">{`Fixed Costs - Year ${selectedYear}`}</div>
+          <div className="section-sub">(Rent, Insurance, Fees, Licenses, Utilities, etc.)</div>
+        </div>
+
+        <div className="form-card">
+          <div className="form-card-body">
+            {canCreateCostEntry ? (
+              <form className="form-row" onSubmit={submitFixed}>
+                <input
+                  className="fi fw-date"
+                  type={fixedDate ? "date" : "text"}
+                  placeholder="dd/mm/yyyy"
+                  value={fixedDate}
+                  onFocus={(event) => {
+                    event.currentTarget.type = "date";
+                  }}
+                  onBlur={(event) => {
+                    if (!event.currentTarget.value) {
+                      event.currentTarget.type = "text";
+                    }
+                  }}
+                  onChange={(event) => setFixedDate(event.target.value)}
+                  required
+                />
+                <select className="fs fw-type" value={fixedCategory} onChange={(event) => setFixedCategory(event.target.value)}>
+                  {FIXED_COST_OPTIONS.map((item) => (
+                    <option key={item} value={item}>
+                      {item}
+                    </option>
+                  ))}
+                  <option value={OTHER_OPTION}>Other...</option>
+                </select>
+                {fixedCategory === OTHER_OPTION ? (
+                  <input
+                    className="fi fw-type"
+                    placeholder="Custom Description"
+                    value={fixedCustomDescription}
+                    onChange={(event) => setFixedCustomDescription(event.target.value)}
+                    required
+                  />
+                ) : null}
+                <input
+                  className="fi fw-amount"
+                  placeholder="Amount (S$)"
+                  inputMode="decimal"
+                  value={fixedAmount}
+                  onChange={(event) => setFixedAmount(event.target.value)}
+                  required
+                />
+                <input className="fi fw-remark" placeholder="Remarks" value={fixedRemarks} onChange={(event) => setFixedRemarks(event.target.value)} />
+                <button className="btn-cost" type="submit">
+                  Add Fixed Cost
+                </button>
+              </form>
+            ) : (
+              <div className="form-hint">Cost entry creation is disabled for users without a branch assignment.</div>
+            )}
+          </div>
+        </div>
+
+        <div className="tbl-row">
+          <div className="tbl-card fixed">
+            <div className="tbl-card-hd">
+              <div className="tbl-card-title">Fixed Cost Entries</div>
+              <div className="tbl-card-meta">{`${filteredFixed.length} entr${filteredFixed.length === 1 ? "y" : "ies"}`}</div>
+            </div>
+            <div className="tscroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th className="l">S.No</th>
+                    <th className="l">Invoice Date</th>
+                    <th className="l">Description</th>
+                    <th>Amount (S$)</th>
+                    <th className="l">Remarks</th>
+                    <th className="l">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredFixed.length === 0 ? (
+                    <tr className="empty">
+                      <td className="l" colSpan={6}>
+                        No entries yet.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredFixed.map((item, index) => (
+                      <tr key={item.fixed_cost_id} className="on">
+                        <td className="l">{index + 1}</td>
+                        <td className="l">{formatDate(item.date)}</td>
+                        <td className="l hi">{item.category}</td>
+                        <td>{formatCurrency(item.amount)}</td>
+                        <td className="l">{item.description ?? "-"}</td>
+                        <td className="l">-</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div className="tbl-card">
+            <div className="tbl-card-hd">
+              <div className="tbl-card-title">By Month</div>
+            </div>
+            <div className="tscroll">
+              <table className="mon-tbl">
+                <thead>
+                  <tr>
+                    <th className="l">Month</th>
+                    <th>Expenses (S$)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {MONTHS.map((month, index) => {
+                    const value = fixedMonthlyTotals[index] ?? 0;
+                    return (
+                      <tr key={month} className={value > 0 ? "on" : undefined}>
+                        <td className="l">{month}</td>
+                        <td>{value > 0 ? formatCurrency(value) : "-"}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <td className="l">Total</td>
+                    <td>{sum(fixedMonthlyTotals) > 0 ? formatCurrency(sum(fixedMonthlyTotals)) : "-"}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="cost-section">
+        <div className="section-label">
+          <div className="section-title">{`Variable Costs - Year ${selectedYear}`}</div>
+          <div className="section-sub">(Payroll, Shipping, Equipment, Marketing, Other expenses, etc.)</div>
+        </div>
+
+        <div className="form-card">
+          <div className="form-card-body">
+            {canCreateCostEntry ? (
+              <form className="form-row" onSubmit={submitVariable}>
+                <input
+                  className="fi fw-date"
+                  type={variableDate ? "date" : "text"}
+                  placeholder="dd/mm/yyyy"
+                  value={variableDate}
+                  onFocus={(event) => {
+                    event.currentTarget.type = "date";
+                  }}
+                  onBlur={(event) => {
+                    if (!event.currentTarget.value) {
+                      event.currentTarget.type = "text";
+                    }
+                  }}
+                  onChange={(event) => setVariableDate(event.target.value)}
+                  required
+                />
+                <select className="fs fw-type" value={variableCategory} onChange={(event) => setVariableCategory(event.target.value)}>
+                  {VARIABLE_COST_OPTIONS.map((item) => (
+                    <option key={item} value={item}>
+                      {item}
+                    </option>
+                  ))}
+                  <option value={OTHER_OPTION}>Other...</option>
+                </select>
+                {variableCategory === OTHER_OPTION ? (
+                  <input
+                    className="fi fw-type"
+                    placeholder="Custom Description"
+                    value={variableCustomDescription}
+                    onChange={(event) => setVariableCustomDescription(event.target.value)}
+                    required
+                  />
+                ) : null}
+                <input
+                  className="fi fw-amount"
+                  placeholder="Amount (S$)"
+                  inputMode="decimal"
+                  value={variableAmount}
+                  onChange={(event) => setVariableAmount(event.target.value)}
+                  required
+                />
+                <input className="fi fw-remark" placeholder="Remarks" value={variableRemarks} onChange={(event) => setVariableRemarks(event.target.value)} />
+                <button className="btn-cost amber" type="submit">
+                  Add Variable Cost
+                </button>
+              </form>
+            ) : (
+              <div className="form-hint">Cost entry creation is disabled for users without a branch assignment.</div>
+            )}
+          </div>
+        </div>
+
+        <div className="tbl-row">
+          <div className="tbl-card variable">
+            <div className="tbl-card-hd">
+              <div className="tbl-card-title">Variable Cost Entries</div>
+              <div className="tbl-card-meta">{`${filteredVariable.length} entr${filteredVariable.length === 1 ? "y" : "ies"}`}</div>
+            </div>
+            <div className="tscroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th className="l">S.No</th>
+                    <th className="l">Invoice Date</th>
+                    <th className="l">Description</th>
+                    <th>Amount (S$)</th>
+                    <th className="l">Remarks</th>
+                    <th className="l">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredVariable.length === 0 ? (
+                    <tr className="empty">
+                      <td className="l" colSpan={6}>
+                        No entries yet.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredVariable.map((item, index) => (
+                      <tr key={item.variable_cost_id} className="on">
+                        <td className="l">{index + 1}</td>
+                        <td className="l">{formatDate(item.date)}</td>
+                        <td className="l hi">{item.category}</td>
+                        <td>{formatCurrency(item.amount)}</td>
+                        <td className="l">{item.description ?? "-"}</td>
+                        <td className="l">-</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div className="tbl-card">
+            <div className="tbl-card-hd">
+              <div className="tbl-card-title">By Month</div>
+            </div>
+            <div className="tscroll">
+              <table className="mon-tbl">
+                <thead>
+                  <tr>
+                    <th className="l">Month</th>
+                    <th>Expenses (S$)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {MONTHS.map((month, index) => {
+                    const value = variableMonthlyTotals[index] ?? 0;
+                    return (
+                      <tr key={month} className={value > 0 ? "on" : undefined}>
+                        <td className="l">{month}</td>
+                        <td>{value > 0 ? formatCurrency(value) : "-"}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <td className="l">Total</td>
+                    <td>{sum(variableMonthlyTotals) > 0 ? formatCurrency(sum(variableMonthlyTotals)) : "-"}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="cost-section">
+        <div className="section-label">
+          <div className="section-title">{`Failure Costs - Year ${selectedYear}`}</div>
+          <div className="section-sub">(Defects, Returns, Rework, Customer complaints, etc.)</div>
+        </div>
+
+        <div className="form-card">
+          <div className="form-card-body">
+            {canCreateCostEntry ? (
+              <form className="form-row" onSubmit={submitFailure}>
+                <select className="fs fw-type" value={failureType} onChange={(event) => setFailureType(event.target.value as FailureType)}>
+                  {FAILURE_TYPE_OPTIONS.map((item) => (
+                    <option key={item.value} value={item.value}>
+                      {item.label}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  className="fi fw-date"
+                  type={failureDate ? "date" : "text"}
+                  placeholder="dd/mm/yyyy"
+                  value={failureDate}
+                  onFocus={(event) => {
+                    event.currentTarget.type = "date";
+                  }}
+                  onBlur={(event) => {
+                    if (!event.currentTarget.value) {
+                      event.currentTarget.type = "text";
+                    }
+                  }}
+                  onChange={(event) => setFailureDate(event.target.value)}
+                  required
+                />
+                <input
+                  className="fi fw-amount"
+                  placeholder="Amount (S$)"
+                  inputMode="decimal"
+                  value={failureAmount}
+                  onChange={(event) => setFailureAmount(event.target.value)}
+                  required
+                />
+                <input className="fi fw-root" placeholder="Root Cause" value={failureRootCause} onChange={(event) => setFailureRootCause(event.target.value)} />
+                <button className="btn-cost red" type="submit">
+                  Add Failure Cost
+                </button>
+              </form>
+            ) : (
+              <div className="form-hint">Cost entry creation is disabled for users without a branch assignment.</div>
+            )}
+          </div>
+        </div>
+
+        <div className="tbl-card failure">
+          <div className="tbl-card-hd">
+            <div className="tbl-card-title">Failure Cost Entries</div>
+            <div className="tbl-card-meta">{`${filteredFailure.length} entr${filteredFailure.length === 1 ? "y" : "ies"}`}</div>
+          </div>
+          <div className="tscroll">
+            <table>
+              <thead>
+                <tr>
+                  <th className="l">Date</th>
+                  <th className="l">Failure Type</th>
+                  <th>Amount (S$)</th>
+                  <th className="l">Root Cause</th>
+                  <th className="l">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredFailure.length === 0 ? (
+                  <tr className="empty">
+                    <td className="l" colSpan={5}>
+                      No failure costs yet.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredFailure.map((item) => (
+                    <tr key={item.failure_cost_id} className="on">
+                      <td className="l">{formatDate(item.date)}</td>
+                      <td className="l hi">{item.failure_type}</td>
+                      <td className="neg">{formatCurrency(item.amount)}</td>
+                      <td className="l">{item.root_cause ?? "-"}</td>
+                      <td className="l">-</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td className="l">Total</td>
+                  <td />
+                  <td className="neg">{failureTotal > 0 ? formatCurrency(failureTotal) : "-"}</td>
+                  <td />
+                  <td />
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
       </section>
     </div>
   );

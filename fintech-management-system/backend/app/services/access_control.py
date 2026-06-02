@@ -3,11 +3,14 @@ import uuid
 from fastapi import HTTPException, status
 
 from app.models.entities import User
-from app.models.enums import UserRole
+from app.models.enums import UserRole, is_owner_role
 
 
 def ensure_branch_access(current_user: User, branch_id: uuid.UUID) -> None:
-    if current_user.role == UserRole.ADMIN:
+    if is_owner_role(current_user.role):
+        return
+    if current_user.role == UserRole.BUSINESS_MANAGER:
+        # Branch-level checks for business manager are applied in query-scoping services.
         return
     if current_user.branch_id != branch_id:
         raise HTTPException(
@@ -17,5 +20,5 @@ def ensure_branch_access(current_user: User, branch_id: uuid.UUID) -> None:
 
 
 def ensure_admin(current_user: User) -> None:
-    if current_user.role != UserRole.ADMIN:
+    if not is_owner_role(current_user.role):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")

@@ -1,4 +1,6 @@
-from fastapi import APIRouter, HTTPException, status
+import uuid
+
+from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import select
 
 from app.api.deps import CurrentUser, DbSession
@@ -14,6 +16,7 @@ from app.schemas.cost import (
 )
 from app.services.audit_service import AuditService
 from app.services.cost_service import CostService
+from app.services.scope_service import apply_scope_filters
 
 router = APIRouter(prefix="/costs", tags=["costs"])
 
@@ -51,15 +54,36 @@ def create_failure_cost(payload: FailureCostCreate, db: DbSession, current_user:
 
 
 @router.get("", response_model=dict[str, list])
-def list_costs(db: DbSession, current_user: CurrentUser) -> dict[str, list]:
-    fixed_query = select(FixedCost)
-    variable_query = select(VariableCost)
-    failure_query = select(FailureCost)
-
-    if current_user.role != UserRole.ADMIN:
-        fixed_query = fixed_query.where(FixedCost.branch_id == current_user.branch_id)
-        variable_query = variable_query.where(VariableCost.branch_id == current_user.branch_id)
-        failure_query = failure_query.where(FailureCost.branch_id == current_user.branch_id)
+def list_costs(
+    db: DbSession,
+    current_user: CurrentUser,
+    business_id: uuid.UUID | None = Query(default=None),
+    branch_id: uuid.UUID | None = Query(default=None),
+) -> dict[str, list]:
+    fixed_query = apply_scope_filters(
+        select(FixedCost),
+        db=db,
+        current_user=current_user,
+        branch_column=FixedCost.branch_id,
+        business_id=business_id,
+        branch_id=branch_id,
+    )
+    variable_query = apply_scope_filters(
+        select(VariableCost),
+        db=db,
+        current_user=current_user,
+        branch_column=VariableCost.branch_id,
+        business_id=business_id,
+        branch_id=branch_id,
+    )
+    failure_query = apply_scope_filters(
+        select(FailureCost),
+        db=db,
+        current_user=current_user,
+        branch_column=FailureCost.branch_id,
+        business_id=business_id,
+        branch_id=branch_id,
+    )
 
     fixed = list(db.execute(fixed_query).scalars().all())
     variable = list(db.execute(variable_query).scalars().all())
