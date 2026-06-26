@@ -1,19 +1,28 @@
 import { useEffect, useMemo, useState } from "react";
-import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import type { TooltipProps } from "recharts";
 
-import { api } from "../../lib/api";
-import { getApiErrorMessage } from "../../lib/apiError";
-import { formatCurrency } from "../../lib/format";
-import type {
-  Branch,
-  Business,
-  BusinessPerformancePoint,
-  CostsResponse,
-  Payment,
-  RevenueTrendPoint,
-  VendorPayment,
-} from "../../lib/types";
-import { useAuth } from "../auth/AuthContext";
+import { PageHeader } from "@/components/layout/PageHeader";
+import { DashboardSkeleton } from "@/components/state/DashboardSkeleton";
+import { EmptyState } from "@/components/state/EmptyState";
+import { ErrorState } from "@/components/state/ErrorState";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useAuth } from "@/features/auth/AuthContext";
+import { formatCurrency } from "@/lib/format";
+import {
+  useBranches,
+  useBusinessPerformance,
+  useBusinesses,
+  useCosts,
+  useDashboardRevenueTrend,
+  useDashboardSummary,
+  usePayments,
+  useVendorPayments,
+} from "@/lib/queries";
+import type { Branch, Business, BusinessPerformancePoint, CostsResponse, Payment, RevenueTrendPoint, VendorPayment } from "@/lib/types";
 
 const MONTH_LABELS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const MONTH_LABELS_FULL = [
@@ -30,7 +39,14 @@ const MONTH_LABELS_FULL = [
   "November",
   "December",
 ];
+
 const EMPTY_COSTS: CostsResponse = { fixed: [], variable: [], failure: [] };
+const EMPTY_BUSINESSES: Business[] = [];
+const EMPTY_BRANCHES: Branch[] = [];
+const EMPTY_TREND: RevenueTrendPoint[] = [];
+const EMPTY_PAYMENTS: Payment[] = [];
+const EMPTY_VENDOR_PAYMENTS: VendorPayment[] = [];
+const EMPTY_PERFORMANCE: BusinessPerformancePoint[] = [];
 
 function parseAmount(value: string | number): number {
   const parsed = typeof value === "number" ? value : Number(value);
@@ -61,20 +77,11 @@ function sum(values: number[]): number {
   return values.reduce((accumulator, value) => accumulator + value, 0);
 }
 
-function toRatio(numerator: number, denominator: number): string {
-  if (denominator <= 0) {
-    return "0.0%";
-  }
-  return `${((numerator / denominator) * 100).toFixed(1)}%`;
-}
-
 function buildTrendSeries(trend: RevenueTrendPoint[], selectedYear: number, metric: "revenue" | "gross_profit"): number[] {
   const values = Array<number>(12).fill(0);
   for (const point of trend) {
     const parsed = extractYearMonth(point.month);
-    if (!parsed || parsed.year !== selectedYear) {
-      continue;
-    }
+    if (!parsed || parsed.year !== selectedYear) continue;
     values[parsed.month - 1] += parseAmount(point[metric]);
   }
   return values;
@@ -84,9 +91,7 @@ function buildCostSeries(rows: Array<{ amount: string; date: string }>, selected
   const values = Array<number>(12).fill(0);
   for (const row of rows) {
     const parsed = extractYearMonth(row.date);
-    if (!parsed || parsed.year !== selectedYear) {
-      continue;
-    }
+    if (!parsed || parsed.year !== selectedYear) continue;
     values[parsed.month - 1] += parseAmount(row.amount);
   }
   return values;
@@ -96,148 +101,140 @@ function buildPaymentSeries(rows: Array<{ amount: string; payment_date: string }
   const values = Array<number>(12).fill(0);
   for (const row of rows) {
     const parsed = extractYearMonth(row.payment_date);
-    if (!parsed || parsed.year !== selectedYear) {
-      continue;
-    }
+    if (!parsed || parsed.year !== selectedYear) continue;
     values[parsed.month - 1] += parseAmount(row.amount);
   }
   return values;
 }
 
 function toDashMoney(value: number): string {
-  if (value === 0) {
-    return "-";
-  }
-  return formatCurrency(value);
+  return value === 0 ? "-" : formatCurrency(value);
 }
 
 function branchOptionLabel(branch: Branch): string {
-  const shortId = branch.branch_id.slice(0, 8);
-  return `${branch.branch_name} (${shortId})`;
+  return `${branch.branch_name} (${branch.branch_id.slice(0, 8)})`;
+}
+
+function ChartTooltip({ active, payload, label }: TooltipProps<number, string>) {
+  if (!active || !payload || payload.length === 0) {
+    return null;
+  }
+
+  const labelText = typeof label === "string" ? label : String(label ?? "");
+
+  return (
+    <div className="rounded-md border bg-popover px-3 py-2 text-popover-foreground shadow-md">
+      <div className="mb-1 text-xs font-medium text-muted-foreground">{labelText}</div>
+      <div className="space-y-1">
+        {payload.map((item, index) => {
+          const dataKey = String(item.dataKey ?? item.name ?? index);
+          const displayName =
+            dataKey === "grossProfit"
+              ? "Gross Profit"
+              : dataKey === "netIncome"
+                ? "Net Income"
+                : dataKey === "fixed"
+                  ? "Fixed Costs"
+                  : dataKey === "variable"
+                    ? "Variable Costs"
+                    : dataKey === "failure"
+                      ? "Failure Costs"
+                      : dataKey === "revenue"
+                        ? "Revenue"
+                        : dataKey;
+
+          const rawValue = typeof item.value === "number" ? item.value : Number(item.value);
+          const formatted = Number.isFinite(rawValue) ? formatCurrency(rawValue) : "-";
+
+          return (
+            <div key={`${dataKey}-${index}`} className="flex items-center justify-between gap-6 text-sm">
+              <div className="flex items-center gap-2">
+                <span
+                  className="h-2 w-2 rounded-full"
+                  style={{ backgroundColor: item.color ?? "hsl(var(--foreground))" }}
+                />
+                <span className="truncate">{displayName}</span>
+              </div>
+              <span className="font-medium tabular-nums">{formatted}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 export function DashboardPage() {
   const { user } = useAuth();
-  const [trend, setTrend] = useState<RevenueTrendPoint[]>([]);
-  const [costs, setCosts] = useState<CostsResponse>(EMPTY_COSTS);
-  const [payments, setPayments] = useState<Payment[]>([]);
-  const [vendorPayments, setVendorPayments] = useState<VendorPayment[]>([]);
-  const [businessPerformance, setBusinessPerformance] = useState<BusinessPerformancePoint[]>([]);
-  const [businesses, setBusinesses] = useState<Business[]>([]);
-  const [branches, setBranches] = useState<Branch[]>([]);
-  const [selectedBusinessId, setSelectedBusinessId] = useState<string>("");
-  const [selectedBranchId, setSelectedBranchId] = useState<string>("");
-  const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
-  const [error, setError] = useState<string | null>(null);
-
   const canFilterByBusiness = user?.role === "owner" || user?.role === "admin";
   const canFilterByBranch = canFilterByBusiness || user?.role === "business_manager";
 
-  useEffect(() => {
-    if (!user) {
-      return;
-    }
+  const [selectedBusinessId, setSelectedBusinessId] = useState<string>("");
+  const [selectedBranchId, setSelectedBranchId] = useState<string>("");
+  const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
 
+  useEffect(() => {
+    if (!user) return;
     if (user.role === "business_manager" && user.business_id) {
       setSelectedBusinessId(user.business_id);
     } else if (!canFilterByBusiness) {
       setSelectedBusinessId("");
     }
+  }, [user, canFilterByBusiness]);
 
-    const requests: Array<Promise<unknown>> = [];
-    if (canFilterByBusiness) {
-      requests.push(api.get<Business[]>("/businesses"));
-    }
-    if (canFilterByBranch) {
-      requests.push(api.get<Branch[]>("/branches"));
-    }
+  const scope = useMemo(
+    () => ({
+      businessId: selectedBusinessId || undefined,
+      branchId: selectedBranchId || undefined,
+    }),
+    [selectedBusinessId, selectedBranchId],
+  );
 
-    if (requests.length === 0) {
-      setBusinesses([]);
-      setBranches([]);
-      return;
-    }
+  const businessesQuery = useBusinesses(canFilterByBusiness);
+  const branchesQuery = useBranches(canFilterByBranch);
+  const summaryQuery = useDashboardSummary(scope);
+  const trendQuery = useDashboardRevenueTrend(scope);
+  const costsQuery = useCosts(scope);
+  const paymentsQuery = usePayments(scope);
+  const vendorPaymentsQuery = useVendorPayments(scope);
+  const businessPerformanceQuery = useBusinessPerformance({ ...scope, year: selectedYear });
 
-    Promise.all(requests)
-      .then((responses) => {
-        let responseIndex = 0;
-        if (canFilterByBusiness) {
-          const businessResponse = responses[responseIndex] as { data: Business[] };
-          setBusinesses(businessResponse.data);
-          responseIndex += 1;
-        } else {
-          setBusinesses([]);
-        }
-
-        if (canFilterByBranch) {
-          const branchResponse = responses[responseIndex] as { data: Branch[] };
-          setBranches(branchResponse.data);
-        } else {
-          setBranches([]);
-        }
-      })
-      .catch((requestError: unknown) =>
-        setError(getApiErrorMessage(requestError, "Failed to load dashboard filters")),
-      );
-  }, [user, canFilterByBusiness, canFilterByBranch]);
+  const businesses = businessesQuery.data ?? EMPTY_BUSINESSES;
+  const branches = branchesQuery.data ?? EMPTY_BRANCHES;
+  const trend = trendQuery.data ?? EMPTY_TREND;
+  const costs = costsQuery.data ?? EMPTY_COSTS;
+  const payments = paymentsQuery.data ?? EMPTY_PAYMENTS;
+  const vendorPayments = vendorPaymentsQuery.data ?? EMPTY_VENDOR_PAYMENTS;
+  const businessPerformance = businessPerformanceQuery.data ?? EMPTY_PERFORMANCE;
 
   const visibleBranches = useMemo(
-    () =>
-      selectedBusinessId
-        ? branches.filter((branch) => branch.business_id === selectedBusinessId)
-        : branches,
+    () => (selectedBusinessId ? branches.filter((branch) => branch.business_id === selectedBusinessId) : branches),
     [branches, selectedBusinessId],
   );
 
   useEffect(() => {
-    if (selectedBranchId && !visibleBranches.some((branch) => branch.branch_id === selectedBranchId)) {
+    if (!selectedBranchId) return;
+    if (!visibleBranches.some((branch) => branch.branch_id === selectedBranchId)) {
       setSelectedBranchId("");
     }
   }, [selectedBranchId, visibleBranches]);
 
-  useEffect(() => {
-    const scopeParams = {
-      business_id: selectedBusinessId || undefined,
-      branch_id: selectedBranchId || undefined,
-    };
-    Promise.all([
-      api.get<RevenueTrendPoint[]>("/dashboard/revenue-trend", { params: { months: 24, ...scopeParams } }),
-      api.get<CostsResponse>("/costs", { params: scopeParams }),
-      api.get<Payment[]>("/payments", { params: scopeParams }),
-      api.get<VendorPayment[]>("/vendor-payments", { params: scopeParams }),
-      api.get<BusinessPerformancePoint[]>("/dashboard/business-performance", { params: { year: selectedYear, ...scopeParams } }),
-    ])
-      .then(([trendResponse, costResponse, paymentResponse, vendorPaymentResponse, businessPerformanceResponse]) => {
-        setTrend(trendResponse.data);
-        setCosts(costResponse.data);
-        setPayments(paymentResponse.data);
-        setVendorPayments(vendorPaymentResponse.data);
-        setBusinessPerformance(businessPerformanceResponse.data);
-      })
-      .catch((requestError: unknown) => setError(getApiErrorMessage(requestError, "Failed to load dashboard data")));
-  }, [selectedBusinessId, selectedBranchId, selectedYear]);
-
   const availableYears = useMemo(() => {
     const years = new Set<number>();
-    const addYearFromValue = (value: string) => {
+    const addYear = (value: string) => {
       const parsed = extractYearMonth(value);
-      if (parsed) {
-        years.add(parsed.year);
-      }
+      if (parsed) years.add(parsed.year);
     };
 
-    trend.forEach((row) => addYearFromValue(row.month));
-    costs.fixed.forEach((row) => addYearFromValue(row.date));
-    costs.variable.forEach((row) => addYearFromValue(row.date));
-    costs.failure.forEach((row) => addYearFromValue(row.date));
-    payments.forEach((row) => addYearFromValue(row.payment_date));
-    vendorPayments.forEach((row) => addYearFromValue(row.payment_date));
+    trend.forEach((row) => addYear(row.month));
+    costs.fixed.forEach((row) => addYear(row.date));
+    costs.variable.forEach((row) => addYear(row.date));
+    costs.failure.forEach((row) => addYear(row.date));
+    payments.forEach((row) => addYear(row.payment_date));
+    vendorPayments.forEach((row) => addYear(row.payment_date));
 
-    if (years.size === 0) {
-      years.add(new Date().getFullYear());
-    }
-
-    return Array.from(years).sort((left, right) => right - left);
+    if (years.size === 0) years.add(new Date().getFullYear());
+    return Array.from(years).sort((a, b) => b - a);
   }, [trend, costs, payments, vendorPayments]);
 
   useEffect(() => {
@@ -246,62 +243,35 @@ export function DashboardPage() {
     }
   }, [availableYears, selectedYear]);
 
-  const revenueByMonth = useMemo(
-    () => buildTrendSeries(trend, selectedYear, "revenue"),
-    [trend, selectedYear],
-  );
-  const grossProfitByMonth = useMemo(
-    () => buildTrendSeries(trend, selectedYear, "gross_profit"),
-    [trend, selectedYear],
-  );
-  const fixedByMonth = useMemo(
-    () => buildCostSeries(costs.fixed, selectedYear),
-    [costs.fixed, selectedYear],
-  );
-  const variableByMonth = useMemo(
-    () => buildCostSeries(costs.variable, selectedYear),
-    [costs.variable, selectedYear],
-  );
-  const failureByMonth = useMemo(
-    () => buildCostSeries(costs.failure, selectedYear),
-    [costs.failure, selectedYear],
-  );
+  const revenueByMonth = useMemo(() => buildTrendSeries(trend, selectedYear, "revenue"), [trend, selectedYear]);
+  const grossProfitByMonth = useMemo(() => buildTrendSeries(trend, selectedYear, "gross_profit"), [trend, selectedYear]);
+  const fixedByMonth = useMemo(() => buildCostSeries(costs.fixed, selectedYear), [costs.fixed, selectedYear]);
+  const variableByMonth = useMemo(() => buildCostSeries(costs.variable, selectedYear), [costs.variable, selectedYear]);
+  const failureByMonth = useMemo(() => buildCostSeries(costs.failure, selectedYear), [costs.failure, selectedYear]);
+  const receivedByMonth = useMemo(() => buildPaymentSeries(payments, selectedYear), [payments, selectedYear]);
+  const paidByMonth = useMemo(() => buildPaymentSeries(vendorPayments, selectedYear), [vendorPayments, selectedYear]);
+
   const netIncomeByMonth = useMemo(
     () =>
-      MONTH_LABELS.map(
-        (_, index) =>
+      MONTH_LABELS.map((_, index) => {
+        return (
           (grossProfitByMonth[index] ?? 0) -
           (fixedByMonth[index] ?? 0) -
           (variableByMonth[index] ?? 0) -
-          (failureByMonth[index] ?? 0),
-      ),
+          (failureByMonth[index] ?? 0)
+        );
+      }),
     [grossProfitByMonth, fixedByMonth, variableByMonth, failureByMonth],
   );
-  const receivedByMonth = useMemo(
-    () => buildPaymentSeries(payments, selectedYear),
-    [payments, selectedYear],
-  );
-  const paidByMonth = useMemo(
-    () => buildPaymentSeries(vendorPayments, selectedYear),
-    [vendorPayments, selectedYear],
-  );
-  const cashNetByMonth = useMemo(
-    () => MONTH_LABELS.map((_, index) => (receivedByMonth[index] ?? 0) - (paidByMonth[index] ?? 0)),
-    [receivedByMonth, paidByMonth],
-  );
 
-  const revenueTotal = sum(revenueByMonth);
-  const grossProfitTotal = sum(grossProfitByMonth);
-  const netIncomeTotal = sum(netIncomeByMonth);
   const fixedTotal = sum(fixedByMonth);
   const variableTotal = sum(variableByMonth);
   const failureTotal = sum(failureByMonth);
   const receivedTotal = sum(receivedByMonth);
   const paidTotal = sum(paidByMonth);
-  const cashNetTotal = sum(cashNetByMonth);
-  const totalCosts = fixedTotal + variableTotal + failureTotal;
+  const cashNetTotal = receivedTotal - paidTotal;
 
-  const chartData = useMemo(
+  const revenueChartData = useMemo(
     () =>
       MONTH_LABELS.map((month, index) => ({
         month,
@@ -309,6 +279,17 @@ export function DashboardPage() {
         grossProfit: grossProfitByMonth[index] ?? 0,
       })),
     [revenueByMonth, grossProfitByMonth],
+  );
+
+  const costChartData = useMemo(
+    () =>
+      MONTH_LABELS.map((month, index) => ({
+        month,
+        fixed: fixedByMonth[index] ?? 0,
+        variable: variableByMonth[index] ?? 0,
+        failure: failureByMonth[index] ?? 0,
+      })),
+    [fixedByMonth, variableByMonth, failureByMonth],
   );
 
   const monthlyRows = useMemo(
@@ -323,316 +304,277 @@ export function DashboardPage() {
     [revenueByMonth, grossProfitByMonth, fixedByMonth, variableByMonth, failureByMonth, netIncomeByMonth],
   );
 
+  const branchComparisonData = useMemo(
+    () =>
+      businessPerformance.map((row) => ({
+        name: row.business_name,
+        revenue: parseAmount(row.revenue),
+        netIncome: parseAmount(row.net_income),
+      })),
+    [businessPerformance],
+  );
+
+  const isLoading =
+    summaryQuery.isLoading ||
+    trendQuery.isLoading ||
+    costsQuery.isLoading ||
+    paymentsQuery.isLoading ||
+    vendorPaymentsQuery.isLoading ||
+    businessPerformanceQuery.isLoading ||
+    (canFilterByBusiness && businessesQuery.isLoading) ||
+    (canFilterByBranch && branchesQuery.isLoading);
+
+  const anyError =
+    summaryQuery.error ||
+    trendQuery.error ||
+    costsQuery.error ||
+    paymentsQuery.error ||
+    vendorPaymentsQuery.error ||
+    businessPerformanceQuery.error ||
+    (canFilterByBusiness && businessesQuery.error) ||
+    (canFilterByBranch && branchesQuery.error);
+
+  const revenueChartHasData = trend.length > 0;
+  const costChartHasData = costs.fixed.length > 0 || costs.variable.length > 0 || costs.failure.length > 0;
+  const branchChartHasData = businessPerformance.length > 0;
+
+  if (isLoading) return <DashboardSkeleton />;
+  if (anyError) return <ErrorState message="Failed to load dashboard. Please try again." />;
+
   const currentYear = new Date().getFullYear();
-  const fixedPct = totalCosts > 0 ? Math.max(4, (fixedTotal / totalCosts) * 100) : 0;
-  const variablePct = totalCosts > 0 ? Math.max(4, (variableTotal / totalCosts) * 100) : 0;
-  const failurePct = totalCosts > 0 ? Math.max(2, (failureTotal / totalCosts) * 100) : 0;
 
   return (
-    <div className="stack">
-      <div className="page-top">
-        <div>
-          <div className="page-title">Dashboard</div>
-          <div className="page-meta">{`Role: ${user?.role ?? "unknown"} · Branch ID: ${user?.branch_id ?? "Unassigned"}`}</div>
-        </div>
-        <div className="ctrl-row">
-          {canFilterByBusiness ? (
-            <>
-              <span className="yr-lbl">Business</span>
-              <select
-                className="ctrl-select"
-                value={selectedBusinessId}
-                onChange={(event) => setSelectedBusinessId(event.target.value)}
-              >
-                <option value="">All businesses</option>
-                {businesses.map((business) => (
-                  <option key={business.business_id} value={business.business_id}>
-                    {business.business_name}
-                  </option>
+    <div className="space-y-6">
+      <PageHeader
+        title="Dashboard"
+        description="Key financial performance and trends."
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            {canFilterByBusiness ? (
+              <Select value={selectedBusinessId || "__all__"} onValueChange={(value) => setSelectedBusinessId(value === "__all__" ? "" : value)}>
+                <SelectTrigger className="w-[200px]">
+                  <SelectValue placeholder="All businesses" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__all__">All businesses</SelectItem>
+                  {businesses.map((business) => (
+                    <SelectItem key={business.business_id} value={business.business_id}>
+                      {business.business_name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : null}
+
+            {canFilterByBranch ? (
+              <Select value={selectedBranchId || "__all__"} onValueChange={(value) => setSelectedBranchId(value === "__all__" ? "" : value)}>
+                <SelectTrigger className="w-[220px]">
+                  <SelectValue placeholder="All branches" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__all__">All branches</SelectItem>
+                  {visibleBranches.map((branch) => (
+                    <SelectItem key={branch.branch_id} value={branch.branch_id}>
+                      {branchOptionLabel(branch)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : null}
+
+            <Select value={String(selectedYear)} onValueChange={(value) => setSelectedYear(Number(value))}>
+              <SelectTrigger className="w-[120px]">
+                <SelectValue placeholder="Year" />
+              </SelectTrigger>
+              <SelectContent>
+                {availableYears.map((year) => (
+                  <SelectItem key={year} value={String(year)}>
+                    {year}
+                  </SelectItem>
                 ))}
-              </select>
-            </>
-          ) : null}
-          {canFilterByBranch ? (
-            <>
-              <span className="yr-lbl">Branch</span>
-              <select
-                className="ctrl-select"
-                value={selectedBranchId}
-                onChange={(event) => setSelectedBranchId(event.target.value)}
-              >
-                <option value="">All branches</option>
-                {visibleBranches.map((branch) => (
-                  <option key={branch.branch_id} value={branch.branch_id}>
-                    {branchOptionLabel(branch)}
-                  </option>
-                ))}
-              </select>
-            </>
-          ) : null}
-          <span className="yr-lbl">Year</span>
-          <select
-            className="ctrl-select"
-            id="dashboard-year"
-            value={selectedYear}
-            onChange={(event) => setSelectedYear(Number(event.target.value))}
-          >
-            {availableYears.map((year) => (
-              <option key={year} value={year}>
-                {year}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            className="ctrl-btn"
-            onClick={() => {
-              setSelectedYear(currentYear);
-              setSelectedBranchId("");
-              if (user?.role === "business_manager") {
-                setSelectedBusinessId(user.business_id ?? "");
-              } else {
-                setSelectedBusinessId("");
-              }
-            }}
-          >
-            Reset
-          </button>
-        </div>
+              </SelectContent>
+            </Select>
+
+            <Button
+              variant="outline"
+              className="border-border/70 bg-background text-foreground"
+              onClick={() => {
+                setSelectedYear(currentYear);
+                setSelectedBranchId("");
+                if (user?.role === "business_manager") {
+                  setSelectedBusinessId(user.business_id ?? "");
+                } else {
+                  setSelectedBusinessId("");
+                }
+              }}
+            >
+              Reset
+            </Button>
+          </div>
+        }
+      />
+
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <Card>
+          <CardHeader className="space-y-1">
+            <CardDescription>Revenue</CardDescription>
+            <CardTitle className="text-2xl">{formatCurrency(summaryQuery.data?.total_revenue ?? "0")}</CardTitle>
+          </CardHeader>
+          <CardContent className="flex items-center justify-between">
+            <div className="text-sm text-muted-foreground">
+              GP {formatCurrency(summaryQuery.data?.gross_profit ?? "0")} · {summaryQuery.data?.gross_profit_margin ?? "0.00"}%
+            </div>
+            <Badge variant="secondary">YTD</Badge>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="space-y-1">
+            <CardDescription>Total Costs</CardDescription>
+            <CardTitle className="text-2xl">{formatCurrency(summaryQuery.data?.total_costs ?? "0")}</CardTitle>
+          </CardHeader>
+          <CardContent className="text-sm text-muted-foreground">
+            Fixed {toDashMoney(fixedTotal)} · Variable {toDashMoney(variableTotal)} · Failure {toDashMoney(failureTotal)}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="space-y-1">
+            <CardDescription>Net Income</CardDescription>
+            <CardTitle className="text-2xl">{formatCurrency(summaryQuery.data?.net_income ?? "0")}</CardTitle>
+          </CardHeader>
+          <CardContent className="flex items-center justify-between">
+            <div className="text-sm text-muted-foreground">Net margin {summaryQuery.data?.net_margin ?? "0.00"}%</div>
+            <Badge variant="secondary">{Number(summaryQuery.data?.net_income ?? "0") >= 0 ? "Positive" : "Negative"}</Badge>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="space-y-1">
+            <CardDescription>Payments (Net Cash)</CardDescription>
+            <CardTitle className="text-2xl">{formatCurrency(cashNetTotal)}</CardTitle>
+          </CardHeader>
+          <CardContent className="text-sm text-muted-foreground">
+            Received {toDashMoney(receivedTotal)} · Paid {toDashMoney(paidTotal)}
+          </CardContent>
+        </Card>
       </div>
 
-      {error ? <div className="sheet error">{error}</div> : null}
+      <div className="grid gap-4 lg:grid-cols-3">
+        <Card className="lg:col-span-2">
+          <CardHeader>
+            <CardTitle>Revenue Trend</CardTitle>
+            <CardDescription>Revenue and gross profit by month.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {revenueChartHasData ? (
+              <div className="h-72">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={revenueChartData} margin={{ top: 10, right: 14, left: -6, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} className="stroke-border" />
+                    <XAxis dataKey="month" tickLine={false} axisLine={false} />
+                    <YAxis tickLine={false} axisLine={false} tickFormatter={(value) => (value === 0 ? "0" : `S$${value}`)} />
+                    <Tooltip content={<ChartTooltip />} cursor={{ stroke: "hsl(var(--border))" }} />
+                    <Line type="monotone" dataKey="revenue" stroke="hsl(var(--primary))" strokeWidth={2} dot={false} />
+                    <Line type="monotone" dataKey="grossProfit" stroke="hsl(142.1 76.2% 36.3%)" strokeWidth={2} dot={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <EmptyState title="No revenue trend data available" description="Create invoices to populate this chart." />
+            )}
+          </CardContent>
+        </Card>
 
-      <section className="kpi-grid">
-        <article className="kpi">
-          <div className="kpi-label">Revenue</div>
-          <div className="kpi-value">{formatCurrency(revenueTotal)}</div>
-          <div className="kpi-sub">{`Gross Profit: ${formatCurrency(grossProfitTotal)}\nMargin: ${toRatio(grossProfitTotal, revenueTotal)}`}</div>
-          <div className="kpi-pill up">Active YTD</div>
-        </article>
-        <article className="kpi">
-          <div className="kpi-label">Net Income</div>
-          <div className="kpi-value">{formatCurrency(netIncomeTotal)}</div>
-          <div className="kpi-sub">{`Net Margin: ${toRatio(netIncomeTotal, revenueTotal)}`}</div>
-          <div className="kpi-pill up">{netIncomeTotal >= 0 ? "Positive" : "Negative"}</div>
-        </article>
-        <article className="kpi">
-          <div className="kpi-label">Total Costs</div>
-          <div className="kpi-value">{formatCurrency(totalCosts)}</div>
-          <div className="kpi-sub">{`Fixed ${formatCurrency(fixedTotal)} · Variable ${formatCurrency(variableTotal)}\nFailure ${formatCurrency(failureTotal)}`}</div>
-          <div className="kpi-pill warn">Monitor</div>
-        </article>
-        <article className="kpi">
-          <div className="kpi-label">Cash Balance</div>
-          <div className="kpi-value">{formatCurrency(cashNetTotal)}</div>
-          <div className="kpi-sub">{`Received ${formatCurrency(receivedTotal)} · Paid ${formatCurrency(paidTotal)}`}</div>
-          <div className="kpi-pill neu">{cashNetTotal >= 0 ? "Healthy" : "Review"}</div>
-        </article>
-      </section>
+        <Card>
+          <CardHeader>
+            <CardTitle>Cost Trend</CardTitle>
+            <CardDescription>Costs by month.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {costChartHasData ? (
+              <div className="h-72">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={costChartData} margin={{ top: 10, right: 14, left: -6, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} className="stroke-border" />
+                    <XAxis dataKey="month" tickLine={false} axisLine={false} />
+                    <YAxis tickLine={false} axisLine={false} tickFormatter={(value) => (value === 0 ? "0" : `S$${value}`)} />
+                    <Tooltip content={<ChartTooltip />} cursor={{ fill: "hsl(var(--muted))", fillOpacity: 0.25 }} />
+                    <Bar dataKey="fixed" stackId="a" fill="hsl(var(--primary))" />
+                    <Bar dataKey="variable" stackId="a" fill="hsl(38 92% 50%)" />
+                    <Bar dataKey="failure" stackId="a" fill="hsl(var(--destructive))" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <EmptyState title="No cost data available" description="Add fixed, variable, or failure costs to see a trend." />
+            )}
+          </CardContent>
+        </Card>
+      </div>
 
-      {businessPerformance.length > 0 ? (
-        <section className="card">
-          <div className="card-hd">
-            <div>
-              <div className="card-title">Business Performance</div>
-              <div className="card-desc">{`Consolidated by business · Year ${selectedYear}`}</div>
-            </div>
-          </div>
-          <div className="tbl-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Business</th>
-                  <th>Revenue (S$)</th>
-                  <th>Gross Profit (S$)</th>
-                  <th>Total Costs (S$)</th>
-                  <th>Net Income (S$)</th>
-                  <th>GP Margin</th>
-                </tr>
-              </thead>
-              <tbody>
-                {businessPerformance.map((row) => (
-                  <tr key={row.business_id}>
-                    <td>{row.business_name}</td>
-                    <td>{formatCurrency(row.revenue)}</td>
-                    <td>{formatCurrency(row.gross_profit)}</td>
-                    <td>{formatCurrency(row.total_costs)}</td>
-                    <td className={Number(row.net_income) >= 0 ? "col-pos" : undefined}>{formatCurrency(row.net_income)}</td>
-                    <td>{`${row.gross_profit_margin}%`}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      ) : null}
-
-      <div className="two-col">
-        <section className="card">
-          <div className="card-hd">
-            <div>
-              <div className="card-title">Revenue &amp; Gross Profit</div>
-              <div className="card-desc">{`Monthly breakdown · Year ${selectedYear}`}</div>
-            </div>
-          </div>
-          <div className="chart-body">
-            <div className="chart-wrap">
+      <Card>
+        <CardHeader>
+          <CardTitle>Branch Comparison</CardTitle>
+          <CardDescription>Revenue and net income by business.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {branchChartHasData ? (
+            <div className="h-72">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={chartData} margin={{ top: 6, right: 6, left: -20, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--line)" />
-                  <XAxis dataKey="month" tick={{ fill: "var(--t3)", fontSize: 10.5 }} tickLine={false} axisLine={false} />
-                  <YAxis
-                    tick={{ fill: "var(--t3)", fontSize: 10.5 }}
-                    tickLine={false}
-                    axisLine={false}
-                    tickFormatter={(value) => (value === 0 ? "0" : `S$${value >= 1000 ? `${(value / 1000).toFixed(0)}k` : value}`)}
-                  />
-                  <Tooltip
-                    formatter={(value: number) => formatCurrency(value)}
-                    contentStyle={{ background: "var(--s2)", border: "1px solid var(--line2)", borderRadius: "8px" }}
-                    labelStyle={{ color: "var(--t2)" }}
-                    itemStyle={{ color: "var(--t1)" }}
-                  />
-                  <Bar dataKey="revenue" fill="rgba(79,142,247,0.65)" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="grossProfit" fill="rgba(34,197,94,0.55)" radius={[4, 4, 0, 0]} />
+                <BarChart data={branchComparisonData} margin={{ top: 10, right: 14, left: -6, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} className="stroke-border" />
+                  <XAxis dataKey="name" tickLine={false} axisLine={false} />
+                  <YAxis tickLine={false} axisLine={false} tickFormatter={(value) => (value === 0 ? "0" : `S$${value}`)} />
+                  <Tooltip content={<ChartTooltip />} cursor={{ fill: "hsl(var(--muted))", fillOpacity: 0.25 }} />
+                  <Bar dataKey="revenue" fill="hsl(var(--primary))" radius={[6, 6, 0, 0]} />
+                  <Bar dataKey="netIncome" fill="hsl(142.1 76.2% 36.3%)" radius={[6, 6, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
-          </div>
-          <div className="chart-legend">
-            <div className="leg">
-              <div className="leg-dot" style={{ background: "var(--blue)" }} />
-              Revenue
-            </div>
-            <div className="leg">
-              <div className="leg-dot" style={{ background: "var(--green)" }} />
-              Gross Profit
-            </div>
-          </div>
-        </section>
+          ) : (
+            <EmptyState title="No comparison data available" description="Create businesses and invoices to compare performance." />
+          )}
+        </CardContent>
+      </Card>
 
-        <section className="card">
-          <div className="card-hd">
-            <div>
-              <div className="card-title">Cost Distribution</div>
-              <div className="card-desc">{`Year ${selectedYear}`}</div>
-            </div>
-          </div>
-
-          <div className="cost-item">
-            <div className="cost-lhs">
-              <div className="cost-indicator" style={{ background: "var(--blue)" }} />
-              <span className="cost-name">Fixed Costs</span>
-            </div>
-            <div className="cost-rhs">
-              <div className="cost-bar-bg">
-                <div className="cost-bar-fill" style={{ width: `${fixedPct}%`, background: "var(--blue)" }} />
-              </div>
-              <span className="cost-amount">{formatCurrency(fixedTotal)}</span>
-            </div>
-          </div>
-
-          <div className="cost-item">
-            <div className="cost-lhs">
-              <div className="cost-indicator" style={{ background: "var(--amber)" }} />
-              <span className="cost-name">Variable Costs</span>
-            </div>
-            <div className="cost-rhs">
-              <div className="cost-bar-bg">
-                <div className="cost-bar-fill" style={{ width: `${variablePct}%`, background: "var(--amber)" }} />
-              </div>
-              <span className="cost-amount">{formatCurrency(variableTotal)}</span>
-            </div>
-          </div>
-
-          <div className="cost-item">
-            <div className="cost-lhs">
-              <div className="cost-indicator" style={{ background: "var(--red)" }} />
-              <span className="cost-name">Failure Costs</span>
-            </div>
-            <div className="cost-rhs">
-              <div className="cost-bar-bg">
-                <div className="cost-bar-fill" style={{ width: `${failurePct}%`, background: "var(--red)" }} />
-              </div>
-              <span className="cost-amount neg">{formatCurrency(failureTotal)}</span>
-            </div>
-          </div>
-
-          <div className="cost-footer">
-            <span className="cost-footer-label">Total Costs</span>
-            <span className="cost-footer-val">{formatCurrency(totalCosts)}</span>
-          </div>
-
-          <div className="cashflow">
-            <div className="cf-head">{`Cash Flow · ${selectedYear}`}</div>
-            <div className="cf-row">
-              <span className="cf-label">Cash Received</span>
-              <span className="cf-val pos">{formatCurrency(receivedTotal)}</span>
-            </div>
-            <div className="cf-row">
-              <span className="cf-label">Cash Paid</span>
-              <span className="cf-val neg">{formatCurrency(paidTotal)}</span>
-            </div>
-            <div className="cf-divider" />
-            <div className="cf-row">
-              <span className="cf-total-label">Closing Balance</span>
-              <span className="cf-total-val">{formatCurrency(cashNetTotal)}</span>
-            </div>
-          </div>
-        </section>
-      </div>
-
-      <section className="card">
-        <div className="card-hd">
-          <div>
-            <div className="card-title">Monthly Financial Summary</div>
-            <div className="card-desc">{`Revenue · Gross Profit · Total Costs · Net Income · Year ${selectedYear}`}</div>
-          </div>
-        </div>
-        <div className="tbl-wrap">
-          <table>
+      <Card>
+        <CardHeader>
+          <CardTitle>Monthly Financial Summary</CardTitle>
+          <CardDescription>{`Revenue · Gross Profit · Total Costs · Net Income · Year ${selectedYear}`}</CardDescription>
+        </CardHeader>
+        <CardContent className="overflow-auto">
+          <table className="w-full min-w-[720px] text-sm">
             <thead>
-              <tr>
-                <th>Month</th>
-                <th>Revenue (S$)</th>
-                <th>Gross Profit (S$)</th>
-                <th>Total Costs (S$)</th>
-                <th>Net Income (S$)</th>
-                <th>Status</th>
+              <tr className="border-b text-muted-foreground">
+                <th className="h-10 px-2 text-left font-medium">Month</th>
+                <th className="h-10 px-2 text-left font-medium">Revenue</th>
+                <th className="h-10 px-2 text-left font-medium">Gross Profit</th>
+                <th className="h-10 px-2 text-left font-medium">Total Costs</th>
+                <th className="h-10 px-2 text-left font-medium">Net Income</th>
+                <th className="h-10 px-2 text-left font-medium">Status</th>
               </tr>
             </thead>
             <tbody>
               {monthlyRows.map((row) => {
-                const active = row.revenue > 0;
+                const active = row.revenue > 0 || row.costsTotal > 0;
                 return (
-                  <tr key={row.month} className={active ? "row-active" : undefined}>
-                    <td>{row.month}</td>
-                    <td>{toDashMoney(row.revenue)}</td>
-                    <td>{toDashMoney(row.grossProfit)}</td>
-                    <td>{toDashMoney(row.costsTotal)}</td>
-                    <td className={row.netIncome > 0 ? "col-pos" : undefined}>{toDashMoney(row.netIncome)}</td>
-                    <td>
-                      <span className={active ? "tag tag-blue" : "tag tag-gray"}>{active ? "Active" : "No data"}</span>
+                  <tr key={row.month} className="border-b hover:bg-muted/50">
+                    <td className="px-2 py-2">{row.month}</td>
+                    <td className="px-2 py-2">{toDashMoney(row.revenue)}</td>
+                    <td className="px-2 py-2">{toDashMoney(row.grossProfit)}</td>
+                    <td className="px-2 py-2">{toDashMoney(row.costsTotal)}</td>
+                    <td className="px-2 py-2">{toDashMoney(row.netIncome)}</td>
+                    <td className="px-2 py-2">
+                      <Badge variant={active ? "secondary" : "outline"}>{active ? "Active" : "No data"}</Badge>
                     </td>
                   </tr>
                 );
               })}
             </tbody>
-            <tfoot>
-              <tr>
-                <td>Total</td>
-                <td>{formatCurrency(revenueTotal)}</td>
-                <td>{formatCurrency(grossProfitTotal)}</td>
-                <td>{formatCurrency(totalCosts)}</td>
-                <td className="col-pos">{formatCurrency(netIncomeTotal)}</td>
-                <td>
-                  <span className="tag tag-green">YTD</span>
-                </td>
-              </tr>
-            </tfoot>
           </table>
-        </div>
-      </section>
+        </CardContent>
+      </Card>
     </div>
   );
 }
