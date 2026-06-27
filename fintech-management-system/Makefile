@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: help install dev dev-db dev-backend dev-frontend stop
+.PHONY: help install dev dev-db dev-backend dev-frontend stop docker-up docker-down docker-logs seed-demo
 
 help:
 	@echo "Available targets:"
@@ -10,6 +10,10 @@ help:
 	@echo "  make dev-frontend  Run Vite frontend on :5173"
 	@echo "  make dev           Start DB, then backend + frontend together"
 	@echo "  make stop          Stop docker compose services"
+	@echo "  make docker-up     Build and start DB + backend + frontend in Docker"
+	@echo "  make docker-down   Stop all Docker services"
+	@echo "  make docker-logs   Tail logs for Docker services"
+	@echo "  make seed-demo     Reset and load demo users/data into Docker DB"
 
 install:
 	cd backend && python3 -m venv .venv && source .venv/bin/activate && pip install -e .[dev]
@@ -33,3 +37,15 @@ dev: dev-db
 
 stop:
 	docker compose down
+
+docker-up:
+	docker compose up -d --build
+
+docker-down:
+	docker compose down
+
+docker-logs:
+	docker compose logs -f --tail=150
+
+seed-demo:
+	docker compose exec -T backend python -m app.utils.demo_seed --reset

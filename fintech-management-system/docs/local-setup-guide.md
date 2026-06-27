@@ -30,7 +30,7 @@ What this does:
 - Installs backend dependencies
 - Installs frontend dependencies
 
-## 4) Start Full Stack
+## 4) Start Full Stack (Local Development)
 
 ```bash
 make dev
@@ -48,16 +48,34 @@ Open:
 - API Docs: `http://localhost:8000/docs`
 - Health: `http://localhost:8000/health`
 
-## 5) Stop Services
+## 5) Database Seeding (Mandatory for Demo Data)
 
-- `Ctrl + C` in terminal running `make dev`
-- Then stop DB:
+To load the test data (vendors, branches, customers, invoices, and audit logs) into the database, run the seeding script.
+
+### For Local Development (`make dev`):
+Open a new terminal window or tab, activate the virtual environment, and run the seed script:
+```bash
+cd backend
+source .venv/bin/activate
+python -m app.utils.demo_seed --reset
+```
+
+### For Docker-Only Run (`make docker-up`):
+Run the demo seeding target directly from your host machine:
+```bash
+make seed-demo
+```
+
+## 6) Stop Services
+
+- Press `Ctrl + C` in the terminal tab running `make dev`
+- Then stop the Docker database container:
 
 ```bash
 make stop
 ```
 
-## 6) Run Checks
+## 7) Run Checks
 
 Backend tests:
 
@@ -74,36 +92,75 @@ cd frontend
 npm run lint
 ```
 
-## 7) Demo Login Accounts
+## 8) Demo Login Accounts
 
-If demo seed has been loaded, common accounts are:
+All seed accounts use the default demo password: **`Demo@12345`**
 
-- Owner: `owner@abc.demo`
-- Business Managers:
-  - `manager.businessx@abc.demo`
-  - `manager.businessy@abc.demo`
-  - `manager.businessz@abc.demo`
-- Branch Managers:
-  - `bm.x1@abc.demo`, `bm.x2@abc.demo`, `bm.x3@abc.demo`
-  - `bm.y1@abc.demo`, `bm.y2@abc.demo`, `bm.y3@abc.demo`
-  - `bm.z1@abc.demo`, `bm.z2@abc.demo`, `bm.z3@abc.demo`
+- **Owner / Administrator** (Consolidated Access):
+  - `owner@abc.demo`
+- **Business Managers** (Scoped to specific business division):
+  - `manager.businessx@abc.demo` (Business X)
+  - `manager.businessy@abc.demo` (Business Y)
+  - `manager.businessz@abc.demo` (Business Z)
+- **Branch Managers** (Scoped to specific physical outlet):
+  - **Business X Outlets**:
+    - `bm.1.1@abc.demo` (Business X Downtown)
+    - `bm.1.2@abc.demo` (Business X Orchard)
+    - `bm.1.3@abc.demo` (Business X Harbour)
+  - **Business Y Outlets**:
+    - `bm.2.1@abc.demo` (Business Y Jurong)
+    - `bm.2.2@abc.demo` (Business Y Tampines)
+    - `bm.2.3@abc.demo` (Business Y Woodlands)
+  - **Business Z Outlets**:
+    - `bm.3.1@abc.demo` (Business Z East Coast)
+    - `bm.3.2@abc.demo` (Business Z Changi)
+    - `bm.3.3@abc.demo` (Business Z Punggol)
 
-Default demo password:
+## 9) Common Issues
 
-- `Demo@12345`
+1. **Docker error**: `Cannot connect to the Docker daemon`
+   - *Fix*: Start Docker Desktop, then rerun `make dev-db` or `make dev`.
 
-## 8) Common Issues
+2. **Port already in use** (`8000` / `5173`)
+   - *Fix*: Stop existing processes using those ports, then rerun `make dev`.
 
-1. Docker error: `Cannot connect to the Docker daemon`
-- Fix: start Docker Desktop, then rerun `make dev-db` or `make dev`.
+3. **Frontend cannot reach backend**
+   - *Fix*: Confirm backend health endpoint works using:
+     `curl http://127.0.0.1:8000/health`
 
-2. Port already in use (`8000` / `5173`)
-- Stop existing process using the port, then rerun `make dev`.
+4. **Branch-based create operations fail for Owner/Admin**
+   - *Fix*: Owners and Admins have global access and are not assigned to a single branch. When creating branch-scoped records (customers, cost entries, payments) as an Admin, make sure to select the target branch explicitly in the UI dropdown field.
 
-3. Frontend cannot reach backend
-- Confirm backend health endpoint works:
-  - `curl http://127.0.0.1:8000/health`
+---
 
-4. Branch-based create operations fail for admin
-- Admin/owner may need explicit branch selection in UI for branch-scoped records (customers/cost entries/payments).
+## Docker-Only Run (Best for Migration or Clean Review)
+
+If you want to run this project on another computer with minimal setup using Docker:
+
+### Start:
+```bash
+git clone https://github.com/pranav281105/Playground.git
+cd Playground/fintech-management-system
+
+# Build and start all services in containerized mode
+make docker-up
+
+# Seed the database with demo accounts and datasets
+make seed-demo
+```
+
+### Access:
+- App UI: `http://localhost:5173`
+- Backend API: `http://localhost:8000`
+- API Docs: `http://localhost:8000/docs`
+
+### Manage:
+*   To view container logs:
+    ```bash
+    make docker-logs
+    ```
+*   To stop all containers and cleanup:
+    ```bash
+    make docker-down
+    ```
 
