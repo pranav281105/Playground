@@ -1,187 +1,395 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { MoreHorizontal, Plus } from "lucide-react";
+import { useMemo, useState } from "react";
+import { useForm } from "react-hook-form";
+import { toast } from "sonner";
+import { z } from "zod";
 
-import { api } from "../../lib/api";
-import { getApiErrorMessage } from "../../lib/apiError";
-import type { Vendor } from "../../lib/types";
+import { PageHeader } from "@/components/layout/PageHeader";
+import { EmptyState } from "@/components/state/EmptyState";
+import { ErrorState } from "@/components/state/ErrorState";
+import { TableSkeleton } from "@/components/state/TableSkeleton";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { api } from "@/lib/api";
+import { getApiErrorMessage } from "@/lib/apiError";
+import { useVendors } from "@/lib/queries";
+import type { Vendor } from "@/lib/types";
 
-type VendorFilter = "all" | "active" | "inactive";
+type StatusFilter = "all" | "active" | "inactive";
+type SortField = "name" | "email" | "status";
+type SortDirection = "asc" | "desc";
+
+const createVendorSchema = z.object({
+  vendor_name: z.string().min(1, "Vendor name is required"),
+  contact_person: z.string().optional(),
+  email: z.string().email().optional().or(z.literal("")),
+  phone: z.string().optional(),
+  bank_details: z.string().optional(),
+  status: z.enum(["active", "inactive"]),
+});
+
+type CreateVendorValues = z.infer<typeof createVendorSchema>;
+
+const EMPTY_VENDORS: Vendor[] = [];
 
 export function VendorsPage() {
-  const [vendors, setVendors] = useState<Vendor[]>([]);
-  const [vendorName, setVendorName] = useState("");
-  const [contactPerson, setContactPerson] = useState("");
-  const [email, setEmail] = useState("");
+  const queryClient = useQueryClient();
+
   const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState<VendorFilter>("all");
-  const [busyVendorId, setBusyVendorId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [sortField, setSortField] = useState<SortField>("name");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
 
-  const loadVendors = () => {
-    api
-      .get<Vendor[]>("/vendors")
-      .then((response) => setVendors(response.data))
-      .catch((requestError: unknown) => setError(getApiErrorMessage(requestError, "Failed to load vendors")));
-  };
+  const vendorsQuery = useVendors();
 
-  useEffect(() => {
-    loadVendors();
-  }, []);
+  const form = useForm<CreateVendorValues>({
+    resolver: zodResolver(createVendorSchema),
+    defaultValues: {
+      vendor_name: "",
+      contact_person: "",
+      email: "",
+      phone: "",
+      bank_details: "",
+      status: "active",
+    },
+  });
 
-  const filteredVendors = useMemo(() => {
+  const createMutation = useMutation({
+    mutationFn: async (values: CreateVendorValues) => {
+      return api.post("/vendors", {
+        vendor_name: values.vendor_name,
+        contact_person: values.contact_person || undefined,
+        email: values.email ? values.email : undefined,
+        phone: values.phone || undefined,
+        bank_details: values.bank_details || undefined,
+        status: values.status,
+      });
+    },
+    onSuccess: async () => {
+      toast.success("Vendor created");
+      const current = form.getValues();
+      form.reset({ ...current, vendor_name: "", contact_person: "", email: "" });
+      await queryClient.invalidateQueries({ queryKey: ["vendors"] });
+    },
+    onError: (error: unknown) => toast.error(getApiErrorMessage(error, "Failed to create vendor")),
+  });
+
+  const updateStatusMutation = useMutation({
+    mutationFn: async ({ vendorId, status }: { vendorId: string; status: "active" | "inactive" }) => {
+      return api.put(`/vendors/${vendorId}`, { status });
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["vendors"] });
+    },
+    onError: (error: unknown) => toast.error(getApiErrorMessage(error, "Failed to update vendor status")),
+  });
+
+  const vendors = vendorsQuery.data ?? EMPTY_VENDORS;
+
+  const counts = useMemo(() => {
+    const total = vendors.length;
+    const active = vendors.filter((v) => v.status === "active").length;
+    const inactive = total - active;
+    return { total, active, inactive };
+  }, [vendors]);
+
+  const filtered = useMemo(() => {
     const keyword = search.trim().toLowerCase();
-
     return vendors.filter((vendor) => {
-      if (filter !== "all" && vendor.status !== filter) {
-        return false;
-      }
-
-      if (!keyword) {
-        return true;
-      }
-
-      return [vendor.vendor_id, vendor.vendor_name, vendor.contact_person ?? "", vendor.email ?? ""]
+      if (statusFilter !== "all" && vendor.status !== statusFilter) return false;
+      if (!keyword) return true;
+      return [vendor.vendor_id, vendor.vendor_name, vendor.contact_person ?? "", vendor.email ?? "", vendor.phone ?? ""]
         .join(" ")
         .toLowerCase()
         .includes(keyword);
     });
-  }, [vendors, filter, search]);
+  }, [search, statusFilter, vendors]);
 
-  const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setError(null);
-    setSuccess(null);
+  const sorted = useMemo(() => {
+    const rows = [...filtered];
+    const dir = sortDirection === "asc" ? 1 : -1;
+    rows.sort((a, b) => {
+      const av = sortField === "name" ? a.vendor_name : sortField === "email" ? (a.email ?? "") : a.status;
+      const bv = sortField === "name" ? b.vendor_name : sortField === "email" ? (b.email ?? "") : b.status;
+      return av.localeCompare(bv) * dir;
+    });
+    return rows;
+  }, [filtered, sortDirection, sortField]);
 
-    try {
-      await api.post("/vendors", {
-        vendor_name: vendorName,
-        contact_person: contactPerson || undefined,
-        email: email || undefined,
-      });
-      setVendorName("");
-      setContactPerson("");
-      setEmail("");
-      setSuccess("Vendor saved.");
-      loadVendors();
-    } catch (requestError: unknown) {
-      setError(getApiErrorMessage(requestError, "Failed to create vendor"));
-    }
-  };
+  const totalPages = Math.max(1, Math.ceil(sorted.length / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const paged = useMemo(() => {
+    const start = (safePage - 1) * pageSize;
+    return sorted.slice(start, start + pageSize);
+  }, [pageSize, safePage, sorted]);
 
-  const toggleStatus = async (vendor: Vendor) => {
-    setBusyVendorId(vendor.vendor_id);
-    setError(null);
-    setSuccess(null);
+  if (vendorsQuery.isLoading) {
+    return (
+      <div className="space-y-6">
+        <PageHeader title="Vendors" description="Manage vendors and payment details." />
+        <TableSkeleton cols={6} />
+      </div>
+    );
+  }
 
-    const nextStatus = vendor.status === "active" ? "inactive" : "active";
-
-    try {
-      await api.put(`/vendors/${vendor.vendor_id}`, { status: nextStatus });
-      setSuccess(`Vendor set to ${nextStatus}.`);
-      loadVendors();
-    } catch (requestError: unknown) {
-      setError(getApiErrorMessage(requestError, "Failed to update vendor status"));
-    } finally {
-      setBusyVendorId(null);
-    }
-  };
+  if (vendorsQuery.error) {
+    return <ErrorState message="Failed to load vendors." />;
+  }
 
   return (
-    <div className="stack">
-      <div className="pg-head">
-        <div>
-          <div className="pg-title">Vendors</div>
-          <div className="pg-meta">Manage vendor directory and status controls.</div>
-        </div>
+    <div className="space-y-6">
+      <PageHeader
+        title="Vendors"
+        description="Manage vendors and keep payment details up to date."
+        actions={
+          <Button
+            onClick={() => {
+              const el = document.getElementById("vendor-name");
+              if (el instanceof HTMLInputElement) el.focus();
+            }}
+          >
+            <Plus className="mr-2 h-4 w-4" />
+            Add Vendor
+          </Button>
+        }
+      />
+
+      <div className="grid gap-4 md:grid-cols-3">
+        <Card>
+          <CardHeader className="space-y-1">
+            <CardDescription>Total Vendors</CardDescription>
+            <CardTitle className="text-2xl">{counts.total}</CardTitle>
+          </CardHeader>
+        </Card>
+        <Card>
+          <CardHeader className="space-y-1">
+            <CardDescription>Active</CardDescription>
+            <CardTitle className="text-2xl">{counts.active}</CardTitle>
+          </CardHeader>
+        </Card>
+        <Card>
+          <CardHeader className="space-y-1">
+            <CardDescription>Inactive</CardDescription>
+            <CardTitle className="text-2xl">{counts.inactive}</CardTitle>
+          </CardHeader>
+        </Card>
       </div>
 
-      <section className="card">
-        <div className="card-hd">
-          <div>
-            <div className="card-title">Add Vendor</div>
-            <div className="card-desc">Register a new vendor to the directory</div>
-          </div>
-        </div>
-        <div className="card-body">
-          <form className="inline-form" onSubmit={onSubmit}>
-            <input placeholder="Vendor Name" value={vendorName} onChange={(event) => setVendorName(event.target.value)} required />
-            <input placeholder="Contact Person" value={contactPerson} onChange={(event) => setContactPerson(event.target.value)} />
-            <input placeholder="Email" type="email" value={email} onChange={(event) => setEmail(event.target.value)} />
-            <button type="submit">Save</button>
-          </form>
-          {error ? <p className="error">{error}</p> : null}
-          {success ? <p>{success}</p> : null}
-        </div>
-      </section>
-
-      <section className="card">
-        <div className="toolbar">
-          <div className="search-wrap">
-            <input
-              className="search-inp"
-              type="text"
-              placeholder="Search by name, email, vendor ID..."
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-            />
-          </div>
-          <div className="filter-btns">
-            <button type="button" className={filter === "all" ? "filter-btn on" : "filter-btn"} onClick={() => setFilter("all")}>All</button>
-            <button type="button" className={filter === "active" ? "filter-btn on" : "filter-btn"} onClick={() => setFilter("active")}>Active</button>
-            <button type="button" className={filter === "inactive" ? "filter-btn on" : "filter-btn"} onClick={() => setFilter("inactive")}>Inactive</button>
-          </div>
-          <div className="toolbar-meta">{`${filteredVendors.length} vendors`}</div>
-        </div>
-
-        <div className="card-hd card-hd-muted">
-          <div className="card-title">Vendor Directory</div>
-        </div>
-
-        <div className="table-scroll">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Vendor ID</th>
-                <th>Name</th>
-                <th>Contact</th>
-                <th>Email</th>
-                <th>Status</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredVendors.map((vendor) => {
-                const isBusy = busyVendorId === vendor.vendor_id;
-                const isActive = vendor.status === "active";
-
-                return (
-                  <tr key={vendor.vendor_id}>
-                    <td>{vendor.vendor_id}</td>
-                    <td>{vendor.vendor_name}</td>
-                    <td>{vendor.contact_person ?? "-"}</td>
-                    <td>{vendor.email ?? "-"}</td>
-                    <td>
-                      <span className={isActive ? "pill pill-green" : "pill pill-gray"}>{vendor.status}</span>
-                    </td>
-                    <td>
-                      <div className="row-actions">
-                        <button type="button" className="btn-row" onClick={() => void toggleStatus(vendor)} disabled={isBusy}>
-                          {isActive ? "Set Inactive" : "Set Active"}
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-              {filteredVendors.length === 0 ? (
-                <tr>
-                  <td colSpan={6}>No vendors match your search.</td>
-                </tr>
+      <Card>
+        <CardHeader>
+          <CardTitle>Add Vendor</CardTitle>
+          <CardDescription>Create a new vendor record.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form
+            className="grid gap-4 md:grid-cols-2"
+            onSubmit={form.handleSubmit(async (values) => {
+              await createMutation.mutateAsync(values);
+            })}
+          >
+            <div className="space-y-2">
+              <label className="text-sm font-medium" htmlFor="vendor-name">
+                Vendor Name
+              </label>
+              <Input id="vendor-name" placeholder="Vendor name" {...form.register("vendor_name")} />
+              {form.formState.errors.vendor_name ? (
+                <p className="text-sm text-destructive">{form.formState.errors.vendor_name.message}</p>
               ) : null}
-            </tbody>
-          </table>
-        </div>
-      </section>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Contact Person</label>
+              <Input placeholder="Contact person" {...form.register("contact_person")} />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Email</label>
+              <Input type="email" placeholder="finance@vendor.com" {...form.register("email")} />
+              {form.formState.errors.email ? (
+                <p className="text-sm text-destructive">{form.formState.errors.email.message}</p>
+              ) : null}
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Phone</label>
+              <Input placeholder="+65 ..." {...form.register("phone")} />
+            </div>
+
+            <div className="space-y-2 md:col-span-2">
+              <label className="text-sm font-medium">Bank Details</label>
+              <Input placeholder="Bank / account details" {...form.register("bank_details")} />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Status</label>
+              <Select value={form.watch("status")} onValueChange={(value) => form.setValue("status", value as "active" | "inactive")}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="active">active</SelectItem>
+                  <SelectItem value="inactive">inactive</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="md:col-span-2">
+              <Button type="submit" disabled={createMutation.isPending} className="w-full md:w-auto">
+                {createMutation.isPending ? "Saving..." : "Save Vendor"}
+              </Button>
+            </div>
+          </form>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="gap-4 md:flex-row md:items-center md:justify-between">
+          <div className="space-y-1">
+            <CardTitle>Vendor Directory</CardTitle>
+            <CardDescription>{sorted.length} vendors</CardDescription>
+          </div>
+          <div className="flex flex-col gap-2 md:flex-row md:items-center">
+            <Input
+              placeholder="Search vendors..."
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setPage(1);
+              }}
+              className="md:w-64"
+            />
+            <Select
+              value={statusFilter}
+              onValueChange={(value) => {
+                setStatusFilter(value as StatusFilter);
+                setPage(1);
+              }}
+            >
+              <SelectTrigger className="md:w-40">
+                <SelectValue placeholder="Status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All</SelectItem>
+                <SelectItem value="active">Active</SelectItem>
+                <SelectItem value="inactive">Inactive</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select
+              value={`${sortField}:${sortDirection}`}
+              onValueChange={(value) => {
+                const [field, dir] = value.split(":");
+                setSortField(field as SortField);
+                setSortDirection(dir as SortDirection);
+              }}
+            >
+              <SelectTrigger className="md:w-48">
+                <SelectValue placeholder="Sort" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="name:asc">Name (A-Z)</SelectItem>
+                <SelectItem value="name:desc">Name (Z-A)</SelectItem>
+                <SelectItem value="email:asc">Email (A-Z)</SelectItem>
+                <SelectItem value="email:desc">Email (Z-A)</SelectItem>
+                <SelectItem value="status:asc">Status (A-Z)</SelectItem>
+                <SelectItem value="status:desc">Status (Z-A)</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select
+              value={String(pageSize)}
+              onValueChange={(value) => {
+                setPageSize(Number(value));
+                setPage(1);
+              }}
+            >
+              <SelectTrigger className="md:w-28">
+                <SelectValue placeholder="Rows" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="10">10</SelectItem>
+                <SelectItem value="20">20</SelectItem>
+                <SelectItem value="50">50</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {sorted.length === 0 ? (
+            <EmptyState title="No vendors found" description="Try adjusting your search or filters." />
+          ) : (
+            <>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Vendor</TableHead>
+                    <TableHead>Contact</TableHead>
+                    <TableHead>Email</TableHead>
+                    <TableHead>Phone</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="w-[80px]" />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {paged.map((vendor) => (
+                    <TableRow key={vendor.vendor_id}>
+                      <TableCell className="font-medium">{vendor.vendor_name}</TableCell>
+                      <TableCell>{vendor.contact_person ?? "-"}</TableCell>
+                      <TableCell>{vendor.email ?? "-"}</TableCell>
+                      <TableCell>{vendor.phone ?? "-"}</TableCell>
+                      <TableCell>
+                        <Badge variant={vendor.status === "active" ? "secondary" : "outline"}>{vendor.status}</Badge>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon" aria-label="Actions">
+                              <MoreHorizontal className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem
+                              disabled={updateStatusMutation.isPending}
+                              onClick={() => {
+                                const next = vendor.status === "active" ? "inactive" : "active";
+                                void updateStatusMutation.mutateAsync({ vendorId: vendor.vendor_id, status: next });
+                                toast.success(`Vendor set to ${next}`);
+                              }}
+                            >
+                              {vendor.status === "active" ? "Set inactive" : "Set active"}
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+
+              <div className="mt-4 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                <div className="text-sm text-muted-foreground">
+                  Page {safePage} of {totalPages}
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={safePage <= 1}>
+                    Previous
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={safePage >= totalPages}>
+                    Next
+                  </Button>
+                </div>
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }
